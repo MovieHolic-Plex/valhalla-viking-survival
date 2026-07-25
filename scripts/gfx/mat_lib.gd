@@ -26,6 +26,12 @@ uniform sampler2D tex_dirt  : filter_nearest, repeat_enable;
 uniform sampler2D tex_rock  : filter_nearest, repeat_enable;
 uniform sampler2D tex_snow  : filter_nearest, repeat_enable;
 uniform sampler2D macro_tex : filter_linear, repeat_enable;
+// 릴리프용 높이 샘플러 — 같은 텍스처를 linear 로 읽어 부드러운 구배를 만든다
+uniform sampler2D hgt_grass : filter_linear, repeat_enable;
+uniform sampler2D hgt_dirt  : filter_linear, repeat_enable;
+uniform sampler2D hgt_rock  : filter_linear, repeat_enable;
+uniform sampler2D hgt_snow  : filter_linear, repeat_enable;
+uniform float bump = 1.4;
 
 uniform float tex_scale = 0.55;    // 1m 당 텍셀 밀도 (클수록 촘촘)
 uniform float wetness = 0.0;
@@ -48,7 +54,22 @@ vec3 tri3(sampler2D t, vec3 p, vec3 bw) {
 	return texture(t, p.yz).rgb * bw.x + texture(t, p.xz).rgb * bw.y
 		+ texture(t, p.xy).rgb * bw.z;
 }
+float tri1(sampler2D t, vec3 p, vec3 bw) {
+	return texture(t, p.yz).r * bw.x + texture(t, p.xz).r * bw.y
+		+ texture(t, p.xy).r * bw.z;
+}
 float mac(vec2 p) { return texture(macro_tex, p).r; }
+
+// 탄젠트 없이 화면 미분으로 범프 노멀을 만든다 (Mikkelsen perturbNormalArb)
+vec3 bump_norm(vec3 spos, vec3 snrm, vec2 dH) {
+	vec3 sx = dFdx(spos);
+	vec3 sy = dFdy(spos);
+	vec3 R1 = cross(sy, snrm);
+	vec3 R2 = cross(snrm, sx);
+	float det = dot(sx, R1);
+	vec3 grad = sign(det) * (dH.x * R1 + dH.y * R2);
+	return normalize(abs(det) * snrm - grad);
+}
 
 void fragment() {
 	vec3 bw = pow(abs(v_norm), vec3(4.0));
@@ -81,6 +102,13 @@ void fragment() {
 	// snowy 는 암반 색 파라미터를 겸하므로 1.0 에 가까울 때(설산)만 눈으로 친다.
 	float snow_amt = smoothstep(0.86, 1.0, snowy) * smoothstep(0.55, 0.20, slope);
 	base = mix(base, sn * vec3(0.86, 0.90, 0.96), snow_amt);
+
+	// 실측 텍스처의 명암 구배로 노멀을 꺾어 표면 릴리프를 만든다
+	float h = tri1(hgt_grass, p, bw) * (0.72 + tri1(hgt_grass, p2, bw) * 0.55);
+	h = mix(h, tri1(hgt_dirt, p, bw) * 1.1, clamp(dirt_amt, 0.0, 1.0));
+	h = mix(h, tri1(hgt_rock, p * 0.6, bw), smoothstep(0.52, 0.78, slope));
+	h = mix(h, tri1(hgt_snow, p * 0.7, bw) * 1.2, snow_amt);
+	NORMAL = bump_norm(VERTEX, NORMAL, vec2(dFdx(h), dFdy(h)) * bump);
 
 	// 젖은 땅
 	float puddle = wetness * (1.0 - smoothstep(0.02, 0.16, slope))
@@ -332,6 +360,10 @@ func _make_terrain_mat() -> void:
 	terrain_mat.set_shader_parameter("tex_dirt", TexLib.get_tex("dirt"))
 	terrain_mat.set_shader_parameter("tex_rock", TexLib.get_tex("rock"))
 	terrain_mat.set_shader_parameter("tex_snow", TexLib.get_tex("snow"))
+	terrain_mat.set_shader_parameter("hgt_grass", TexLib.get_tex("grass"))
+	terrain_mat.set_shader_parameter("hgt_dirt", TexLib.get_tex("dirt"))
+	terrain_mat.set_shader_parameter("hgt_rock", TexLib.get_tex("rock"))
+	terrain_mat.set_shader_parameter("hgt_snow", TexLib.get_tex("snow"))
 	terrain_mat.set_shader_parameter("macro_tex", macro_tex)
 	terrain_mat.set_shader_parameter("tex_scale", 0.55)
 
