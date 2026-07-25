@@ -27,6 +27,7 @@ uniform float detail_power = 0.34;
 uniform vec3 rock_warm : source_color = vec3(0.215, 0.180, 0.145);
 uniform vec3 rock_cool : source_color = vec3(0.395, 0.410, 0.445);
 uniform vec3 dirt_col : source_color = vec3(0.205, 0.155, 0.105);
+uniform float wetness = 0.0;   // 비가 오면 지면이 젖어 어두워지고 광택이 돈다
 
 varying vec3 v_world;
 varying vec3 v_norm;
@@ -74,9 +75,15 @@ void fragment() {
 	// 위를 향한 면일수록 하늘빛을 조금 더 받는다 (대기 산란 흉내)
 	base *= mix(vec3(0.94, 0.95, 0.98), vec3(1.02, 1.01, 0.99), clamp(v_norm.y, 0.0, 1.0));
 
+	// 젖은 땅: 어두워지고 거칠기가 낮아진다. 웅덩이는 평평한 곳에 고인다.
+	float puddle = wetness * (1.0 - smoothstep(0.02, 0.16, slope))
+		* smoothstep(0.35, 0.75, m2);
+	base *= mix(1.0, 0.62, wetness * 0.85);
+	base = mix(base, base * 0.55, puddle);
+
 	ALBEDO = base;
-	ROUGHNESS = mix(0.99, 0.80, slope);
-	SPECULAR = 0.08;
+	ROUGHNESS = mix(mix(0.99, 0.80, slope), 0.14, max(wetness * 0.55, puddle));
+	SPECULAR = mix(0.08, 0.55, max(wetness * 0.7, puddle));
 	AO = mix(1.0, 0.72 + m2 * 0.28, 0.55);
 	AO_LIGHT_AFFECT = 0.4;
 }
@@ -240,6 +247,11 @@ func _ready() -> void:
 func set_wind(v: float) -> void:
 	for m in _foliage_cache.values():
 		m.set_shader_parameter("wind", v)
+
+## 비에 젖은 정도(0~1)를 지형에 반영한다
+func set_wetness(v: float) -> void:
+	if terrain_mat != null:
+		terrain_mat.set_shader_parameter("wetness", v)
 
 # ─────────────────────────────────────────────── 절차 텍스처
 func _make_noise(size: int, freq: float, contrast: float, seed_v: float,

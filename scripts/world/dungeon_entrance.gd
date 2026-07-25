@@ -58,6 +58,7 @@ func _ready() -> void:
 	l.omni_range = 9.0
 	l.position = Vector3(0, 2.2, 0.6)
 	add_child(l)
+	Flicker.attach(l, 0.24, 0.8)
 
 	_label = Label3D.new()
 	_label.text = tr(str(c["n"]))

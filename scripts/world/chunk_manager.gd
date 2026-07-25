@@ -6,9 +6,10 @@ const TIER_NEAR := 2      # 이 거리 이내: 고해상도 + 충돌 + 상호작
 const TIER_MID := 5       # 이 거리 이내: 중해상도 + 멀티메시 배치물
 const TIER_FAR := 6       # 이 거리 이내: 저해상도 지형만
 
-const RES_NEAR := 28
-const RES_MID := 18
-const RES_FAR := 10
+# 가까운 청크는 격자를 촘촘히 — 2.3m 격자에서는 능선이 각져 보인다
+const RES_NEAR := 48
+const RES_MID := 26
+const RES_FAR := 12
 
 const BUILD_PER_FRAME := 1
 

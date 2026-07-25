@@ -878,6 +878,7 @@ func _refresh_equipment() -> void:
 			_torch_light.shadow_enabled = true
 			_torch_light.position = Vector3(0, -0.45, 0)
 			hand_l.add_child(_torch_light)
+			Flicker.attach(_torch_light, 0.30, 1.2)
 			_torch_fx = Fx.fire(hand_l, 0.5)
 			_torch_fx.position = Vector3(0, -0.45, 0)
 	# 방어구 색을 몸통에 반영

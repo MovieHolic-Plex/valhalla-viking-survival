@@ -192,6 +192,7 @@ func _populate(rng: RandomNumberGenerator, c: Dictionary) -> void:
 			l.shadow_enabled = false
 			l.position = t.position + Vector3(0, 1.0, 0)
 			add_child(l)
+			Flicker.attach(l, 0.28, 0.9)
 			var f := Fx.fire(self, 0.7, light_col)
 			f.position = l.position
 

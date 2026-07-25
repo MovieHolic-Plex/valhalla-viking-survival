@@ -80,6 +80,7 @@ func _ready() -> void:
 		_light.shadow_enabled = true
 		_light.position = Vector3(0, size.y * 0.6, 0)
 		add_child(_light)
+		Flicker.attach(_light, 0.26, 1.0)
 
 	if data.get("smelter", false) or data.get("kiln", false) \
 			or data.get("cook", false) or data.get("grind", false):

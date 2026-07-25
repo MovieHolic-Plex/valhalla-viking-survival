@@ -78,6 +78,11 @@ func _impact(pos: Vector3, col) -> void:
 	var scene := get_tree().current_scene
 	Sfx.play_at("arrow_hit", pos, scene, -6.0)
 	Fx.burst(scene, pos, trail_col, 6, 2.0, 0.05, 0.5)
+	# 지형·건축물에 맞으면 자국을 남긴다 (생물에는 남기지 않는다)
+	if col == null or col is StaticBody3D:
+		var nrm: Vector3 = (-vel).normalized() if vel.length() > 0.01 else Vector3.UP
+		Fx.decal(scene, pos, nrm, Color(0.12, 0.10, 0.08, 1.0),
+			randf_range(0.30, 0.50), 20.0)
 	if col != null and is_instance_valid(col):
 		if col is ResourceNode:
 			col.take_hit(dmg, 0, pos, shooter)

@@ -138,6 +138,58 @@ static func smoke(parent: Node, scale_v: float = 1.0,
 	parent.add_child(p)
 	return p
 
+## 지면·벽에 남는 자국(화살 자국, 폭발 그을음). 시간이 지나면 서서히 사라진다.
+## 절차 텍스처 하나를 캐시해 모든 자국이 공유한다.
+static var _decal_tex: Texture2D = null
+
+static func _make_decal_tex(size: int = 64) -> Texture2D:
+	if _decal_tex != null:
+		return _decal_tex
+	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
+	var n := FastNoiseLite.new()
+	n.noise_type = FastNoiseLite.TYPE_SIMPLEX
+	n.frequency = 8.0 / float(size)
+	n.seed = 31337
+	var c := float(size - 1) * 0.5
+	for y in size:
+		for x in size:
+			var d := Vector2(float(x) - c, float(y) - c).length() / (c + 0.001)
+			# 가장자리를 노이즈로 갉아 원형 스티커처럼 보이지 않게 한다
+			var edge := d + n.get_noise_2d(float(x), float(y)) * 0.28
+			var a: float = clampf(1.0 - smoothstep(0.45, 0.95, edge), 0.0, 1.0)
+			img.set_pixel(x, y, Color(1, 1, 1, a))
+	_decal_tex = ImageTexture.create_from_image(img)
+	return _decal_tex
+
+static func decal(parent: Node, pos: Vector3, normal: Vector3, col: Color,
+		size: float = 0.55, life: float = 22.0) -> void:
+	if parent == null or not parent.is_inside_tree():
+		return
+	var d := Decal.new()
+	d.texture_albedo = _make_decal_tex()
+	d.modulate = col
+	d.albedo_mix = 0.85
+	d.size = Vector3(size, maxf(size * 0.8, 0.4), size)
+	d.upper_fade = 0.6
+	d.lower_fade = 0.4
+	d.cull_mask = 0xFFFFF
+	parent.add_child(d)
+	d.global_position = pos + normal * 0.02
+	# 데칼은 -Y 방향으로 투영된다. 표면 법선이 아래를 향하도록 맞춘다.
+	var up := normal.normalized()
+	if absf(up.dot(Vector3.UP)) > 0.98:
+		d.rotation = Vector3.ZERO if up.y > 0.0 else Vector3(PI, 0, 0)
+	else:
+		var right := Vector3.UP.cross(up).normalized()
+		var fwd := up.cross(right).normalized()
+		d.global_transform.basis = Basis(right, up, fwd)
+	d.rotate_object_local(Vector3.UP, randf() * TAU)
+	# 서서히 옅어지다 사라진다
+	var tw := d.create_tween()
+	tw.tween_interval(life * 0.6)
+	tw.tween_property(d, "albedo_mix", 0.0, life * 0.4)
+	tw.tween_callback(d.queue_free)
+
 static func _autofree(n: Node, t: float) -> void:
 	var tm := Timer.new()
 	tm.one_shot = true

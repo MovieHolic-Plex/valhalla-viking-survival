@@ -10,6 +10,8 @@ var _sky_mat: ShaderMaterial
 
 var rain: GPUParticles3D
 var snow: GPUParticles3D
+var splash: GPUParticles3D      # 빗방울이 땅에 튀는 물보라
+var wetness := 0.0              # 지면이 젖은 정도 0~1 (서서히 마른다)
 
 ## 현재 날씨: clear / cloudy / rain / storm / snow / mist / ashfall
 var weather := "clear"
@@ -170,6 +172,45 @@ func _make_weather_particles() -> void:
 	snow = _precip(Color(0.96, 0.98, 1.0, 0.9), Vector3(0.09, 0.09, 0.09), 700, 3.2)
 	snow.emitting = false
 	add_child(snow)
+	splash = _make_splash()
+	splash.emitting = false
+	add_child(splash)
+
+## 땅에 부딪혀 튀는 빗방울. 비 오는 장면의 사실감은 낙하보다 이 튐에서 온다.
+func _make_splash() -> GPUParticles3D:
+	var p := GPUParticles3D.new()
+	p.amount = 260
+	p.lifetime = 0.45
+	p.local_coords = false
+	p.visibility_aabb = AABB(Vector3(-24, -4, -24), Vector3(48, 12, 48))
+	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	var m := ParticleProcessMaterial.new()
+	m.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
+	m.emission_box_extents = Vector3(20, 0.15, 20)
+	m.direction = Vector3(0, 1, 0)
+	m.spread = 42.0
+	m.initial_velocity_min = 0.9
+	m.initial_velocity_max = 2.2
+	m.gravity = Vector3(0, -12.0, 0)
+	m.scale_min = 0.5
+	m.scale_max = 1.1
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.86, 0.92, 1.0, 0.75))
+	grad.set_color(1, Color(0.86, 0.92, 1.0, 0.0))
+	var gt := GradientTexture1D.new()
+	gt.gradient = grad
+	m.color_ramp = gt
+	p.process_material = m
+	var mb := MeshBuilder.new()
+	mb.box(Transform3D.IDENTITY, Vector3(0.03, 0.10, 0.03), Color.WHITE)
+	p.draw_pass_1 = mb.commit()
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color(0.86, 0.92, 1.0, 0.75)
+	p.material_override = mat
+	return p
 
 func _precip(col: Color, size: Vector3, amount: int, speed: float) -> GPUParticles3D:
 	var p := GPUParticles3D.new()
@@ -285,6 +326,12 @@ func _update_weather(delta: float) -> void:
 	if weather == "storm" and _rng.randf() < delta * 0.08:
 		_lightning()
 
+	# 비가 오면 빠르게 젖고, 그친 뒤엔 천천히 마른다
+	var raining := weather in ["rain", "storm"]
+	wetness = move_toward(wetness, 1.0 if raining else 0.0,
+		delta * (0.25 if raining else 0.045))
+	MatLib.set_wetness(wetness)
+
 func _pick_weather(first: bool) -> void:
 	weather_timer = _rng.randf_range(180.0, 420.0)
 	var b := GameState.current_biome
@@ -312,6 +359,8 @@ func _pick_weather(first: bool) -> void:
 		weather = opts[_rng.randi() % opts.size()]
 	rain.emitting = (weather == "rain" or weather == "storm")
 	snow.emitting = (weather == "snow" or weather == "ashfall")
+	if splash != null:
+		splash.emitting = rain.emitting
 	if weather == "ashfall":
 		var m := snow.process_material as ParticleProcessMaterial
 		m.color = Color(0.35, 0.22, 0.18, 0.8)
@@ -386,6 +435,11 @@ func _follow_player() -> void:
 	global_position = p.global_position
 	rain.global_position = p.global_position + Vector3(0, 22, 0)
 	snow.global_position = p.global_position + Vector3(0, 22, 0)
+	if splash != null:
+		# 물보라는 발밑 지면 높이에서 튀어야 한다
+		splash.global_position = Vector3(p.global_position.x,
+			GameState.height_at(p.global_position.x, p.global_position.z) + 0.05,
+			p.global_position.z)
 
 func _on_biome_changed(_b: int) -> void:
 	# 바이옴이 바뀌면 날씨를 다시 굴릴 기회를 준다
