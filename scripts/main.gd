@@ -44,6 +44,11 @@ func _handle_cli() -> void:
 		elif a == "--host":
 			net_host = true
 			auto = true
+		elif a == "--server":
+			# 전용 서버: 화면 없이 월드만 돌린다 (godot --headless -- --server)
+			net_host = true
+			auto = true
+			Net.dedicated = true
 		elif a.begins_with("--join="):
 			net_join = a.substr(7)
 			auto = true
@@ -52,10 +57,14 @@ func _handle_cli() -> void:
 	if net_host:
 		_seed_edit.text = str(sv)
 		await get_tree().process_frame
-		Net.my_name = "호스트"
+		Net.my_name = "전용서버" if Net.dedicated else "호스트"
 		Net.host_game()
 		_begin(false)
-		add_child(NetProbe.new())
+		if not Net.dedicated:
+			add_child(NetProbe.new())
+		else:
+			print("[SERVER] 전용 서버 가동. seed=", sv,
+				" port=", Net.DEFAULT_PORT)
 		return
 	if net_join != "":
 		await get_tree().process_frame

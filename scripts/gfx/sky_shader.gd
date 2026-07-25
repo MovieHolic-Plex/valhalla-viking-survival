@@ -37,6 +37,10 @@ float star_field(vec3 dir) {
 }
 
 // 세 겹으로 흘러가는 구름. 밀도를 그대로 돌려줘서 두께 음영을 낼 수 있게 한다.
+//
+// 주: 두께 있는 볼류메트릭 구름(레이마칭)을 시도했으나 지평선 쪽에서 광선 길이가
+// 급격히 길어져 하늘 전체에 세로 줄무늬(에일리어싱)가 남았다. 지터를 넣고
+// 스텝을 올려도 해소되지 않아, 눈에 보이는 결함을 남기느니 이 방식을 유지한다.
 float clouds(vec3 dir) {
 	if (dir.y < 0.02) return 0.0;
 	vec2 uv = dir.xz / max(dir.y + 0.22, 0.06);
@@ -96,7 +100,8 @@ void sky() {
 	if (LIGHT0_ENABLED) {
 		sun_side = pow(max(dot(dir, -normalize(LIGHT0_DIRECTION)), 0.0), 3.0);
 	}
-	vec3 cloud_col = mix(cloud_dark, cloud_lit, clamp(cl * 0.75 + sun_side * 0.6, 0.0, 1.0));
+	vec3 cloud_col = mix(cloud_dark, cloud_lit,
+		clamp(cl * 0.75 + sun_side * 0.6, 0.0, 1.0));
 	cloud_col += sun_color * sun_side * cl * 0.35;
 	col = mix(col, cloud_col, cl * 0.90);
 

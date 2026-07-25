@@ -32,6 +32,13 @@ var net_pieces: Dictionary = {}           # net_id -> BuildPiece
 var _next_net_id := 0
 var _sync_acc := 0.0
 
+## UPnP 로 공유기 포트를 열어 LAN 밖에서도 접속할 수 있게 한다.
+## 실패해도 LAN 접속에는 영향이 없으므로 조용히 넘어간다.
+var upnp_enabled := true
+var external_ip := ""
+var _upnp_thread: Thread = null
+var dedicated := false      # 전용 서버 모드(플레이어 없이 서버만 돈다)
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -39,6 +46,22 @@ func _ready() -> void:
 	multiplayer.connected_to_server.connect(_on_connected)
 	multiplayer.connection_failed.connect(_on_connect_failed)
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
+
+## 긴 블로킹 작업(월드 생성) 중에 호출해 연결이 끊기지 않게 한다
+func poll_now() -> void:
+	if not is_online:
+		return
+	var mp := multiplayer.multiplayer_peer
+	if mp != null:
+		mp.poll()
+
+## ENet 기본 타임아웃(5초)은 월드 생성 시간보다 짧다. 넉넉히 늘린다.
+func _relax_timeout(peer: ENetMultiplayerPeer) -> void:
+	var host := peer.host
+	if host == null:
+		return
+	for p in host.get_peers():
+		p.set_timeout(5000, 20000, 60000)
 
 func new_net_id() -> int:
 	_next_net_id += 1
@@ -72,7 +95,40 @@ func host_game(port: int = DEFAULT_PORT, pname: String = "") -> bool:
 	peer_names.clear()
 	peer_names[1] = my_name
 	GameState.msg(tr("MSG_NET_HOSTING") % port)
+	if upnp_enabled:
+		_open_upnp_async(port)
 	return true
+
+## UPnP 매핑은 수 초가 걸릴 수 있어 별도 스레드에서 돌린다
+func _open_upnp_async(port: int) -> void:
+	if _upnp_thread != null:
+		return
+	_upnp_thread = Thread.new()
+	_upnp_thread.start(_upnp_worker.bind(port))
+
+func _upnp_worker(port: int) -> void:
+	var up := UPNP.new()
+	var dr := up.discover()
+	if dr != UPNP.UPNP_RESULT_SUCCESS or up.get_gateway() == null \
+			or not up.get_gateway().is_valid_gateway():
+		call_deferred("_upnp_done", "", false)
+		return
+	var ok := up.add_port_mapping(port, port, "valhalla", "UDP", 0)
+	ok = ok if ok == UPNP.UPNP_RESULT_SUCCESS else \
+		up.add_port_mapping(port, port, "valhalla", "UDP")
+	call_deferred("_upnp_done", up.query_external_address(),
+		ok == UPNP.UPNP_RESULT_SUCCESS)
+
+func _upnp_done(ip: String, ok: bool) -> void:
+	if _upnp_thread != null:
+		_upnp_thread.wait_to_finish()
+		_upnp_thread = null
+	external_ip = ip
+	if ok and ip != "":
+		GameState.msg(tr("MSG_NET_UPNP_OK") % ip)
+		print("[NET] UPnP mapped, external IP = ", ip)
+	else:
+		print("[NET] UPnP unavailable — LAN/직접 IP 접속만 가능")
 
 func join_game(ip: String, port: int = DEFAULT_PORT, pname: String = "") -> bool:
 	leave()
@@ -86,6 +142,7 @@ func join_game(ip: String, port: int = DEFAULT_PORT, pname: String = "") -> bool
 	is_host = false
 	if pname != "":
 		my_name = pname
+	_relax_timeout(peer)
 	GameState.msg(tr("MSG_NET_CONNECTING") % ip)
 	return true
 
@@ -108,6 +165,9 @@ func leave() -> void:
 func _on_peer_connected(id: int) -> void:
 	if not is_host:
 		return
+	var mp := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if mp != null:
+		_relax_timeout(mp)
 	# 새 접속자에게 월드 정보를 먼저 보낸다. 그가 월드를 다 만들면 _register 로 답한다.
 	var mods: Array = GameState.gen.mods_to_array() if GameState.gen != null else []
 	_recv_world.rpc_id(id, GameState.world_seed, GameState.time_of_day,
@@ -127,6 +187,9 @@ func _on_peer_disconnected(id: int) -> void:
 		_roster.rpc(peer_names)
 
 func _on_connected() -> void:
+	var mp := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if mp != null:
+		_relax_timeout(mp)
 	GameState.msg(tr("MSG_NET_CONNECTED"))
 
 func _on_connect_failed() -> void:

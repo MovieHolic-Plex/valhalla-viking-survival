@@ -126,6 +126,13 @@ func _make_env() -> void:
 	e.ssao_horizon = 0.10
 	e.ssil_enabled = false
 
+	# 스크린스페이스 반사 — 물·젖은 땅·금속에 주변 지형이 비친다
+	e.ssr_enabled = true
+	e.ssr_max_steps = 48
+	e.ssr_fade_in = 0.2
+	e.ssr_fade_out = 8.0
+	e.ssr_depth_tolerance = 0.4
+
 	# 채도를 1 아래로 내린다. 형광 초록의 원인이 여기 있었다.
 	e.adjustment_enabled = true
 	e.adjustment_saturation = 0.97

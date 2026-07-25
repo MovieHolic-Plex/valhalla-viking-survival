@@ -49,6 +49,18 @@ const ROOMS := {
 	"library": {"w": 6},     # 서고 — 룬석(전승 문구) + 촛대
 	"mushroom": {"w": 8},    # 버섯방 — 발광 버섯 군락
 	"flooded": {"w": 8},     # 침수방 — 물웅덩이 + 이끼
+	"crypt_niche": {"w": 7}, # 납골당 — 벽감에 늘어선 관
+	"forge": {"w": 5},       # 대장간 — 모루·화덕·부서진 도구
+	"barracks": {"w": 6},    # 병영 — 침상과 무기걸이, 잠든 적
+	"well": {"w": 5},        # 우물방 — 가운데 깊은 구멍과 두레박
+	"pillar": {"w": 7},      # 열주실 — 기둥이 늘어선 큰 방
+	"collapsed": {"w": 7},   # 붕괴실 — 무너진 천장과 잔해 더미
+	"banquet": {"w": 5},     # 연회실 — 긴 식탁과 의자
+	"shrine": {"w": 5},      # 사당 — 작은 신상과 공물
+	"web": {"w": 6},         # 거미줄방 — 알집과 늘어진 실
+	"bone_field": {"w": 6},  # 유해방 — 바닥에 흩어진 뼈
+	"cellar": {"w": 6},      # 저장고 — 통과 자루가 쌓인 방
+	"observatory": {"w": 4}, # 관측실 — 천장이 뚫린 방과 별빛
 }
 
 ## 룬석 전승 문구 키
@@ -297,6 +309,18 @@ func _decorate(rk: String, base: Vector3, rng: RandomNumberGenerator,
 		"library": _room_library(base, rng, light_col)
 		"mushroom": _room_mushroom(base, rng)
 		"flooded": _room_flooded(base, rng, c)
+		"crypt_niche": _room_niche(base, rng, c)
+		"forge": _room_forge(base, rng, c)
+		"barracks": _room_barracks(base, rng, c)
+		"well": _room_well(base, rng, c)
+		"pillar": _room_pillar(base, rng, c)
+		"collapsed": _room_collapsed(base, rng, c)
+		"banquet": _room_banquet(base, rng, c)
+		"shrine": _room_shrine(base, rng, c, light_col)
+		"web": _room_web(base, rng, c)
+		"bone_field": _room_bones(base, rng, c)
+		"cellar": _room_cellar(base, rng, c)
+		"observatory": _room_observatory(base, rng, light_col)
 
 ## 보물방 — 상자 셋과 금화 더미. 밝게 밝혀 눈에 띄게 한다.
 func _room_treasure(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
@@ -514,6 +538,277 @@ func _room_flooded(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> 
 	if rng.randf() < 0.4:
 		_place_chest(base + Vector3(rng.randf_range(-2.0, 2.0), 0.45,
 			rng.randf_range(-2.0, 2.0)), rng, c)
+
+
+## ── 추가 방 템플릿 ───────────────────────────────────────────
+func _mesh_at(mb: MeshBuilder, base: Vector3, mat: Material) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mb.commit()
+	mi.material_override = mat
+	add_child(mi)
+	mi.global_position = base
+	return mi
+
+func _stone_mat() -> Material:
+	return MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "masonry")
+
+func _wood_mat() -> Material:
+	return MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "plank")
+
+## 납골당 — 벽을 따라 늘어선 석관
+func _room_niche(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	for side in [-1.0, 1.0]:
+		for i in range(3):
+			var z := -2.6 + float(i) * 2.6
+			mb.box(Transform3D(Basis.IDENTITY, Vector3(3.2 * side, 0.45, z)),
+				Vector3(1.6, 0.9, 2.0), stone.lightened(0.06))
+			mb.box(Transform3D(Basis.IDENTITY, Vector3(3.2 * side, 0.95, z)),
+				Vector3(1.7, 0.14, 2.1), stone.darkened(0.14))
+	_mesh_at(mb, base, _stone_mat())
+	for i in range(rng.randi_range(1, 2)):
+		var e := Enemy.spawn("skeleton", self, base + Vector3(
+			rng.randf_range(-1.5, 1.5), 0.3, rng.randf_range(-3.0, 3.0)))
+		if e:
+			e.set_meta("dungeon", true)
+	if rng.randf() < 0.45:
+		_place_chest(base + Vector3(0, 0.45, 0), rng, c)
+
+## 대장간 — 모루와 화덕
+func _room_forge(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	mb.box_up(Vector3(-1.6, 0, 0), Vector3(1.4, 0.8, 1.0), stone.darkened(0.10))
+	mb.box_up(Vector3(-1.6, 0.8, 0), Vector3(1.7, 0.35, 0.6), Color(0.32, 0.31, 0.30))
+	mb.box_up(Vector3(2.0, 0, 0.4), Vector3(2.2, 1.5, 2.2), stone.darkened(0.16))
+	mb.cyl(Transform3D(Basis.IDENTITY, Vector3(2.0, 1.5, 0.4)), 0.5, 0.36, 2.6, 7,
+		stone.darkened(0.22))
+	_mesh_at(mb, base, _stone_mat())
+	var fire := Fx.fire(self, 0.55, Color(1.0, 0.60, 0.20))
+	fire.global_position = base + Vector3(2.0, 1.3, 0.4)
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.58, 0.20)
+	l.light_energy = 1.4
+	l.omni_range = 8.0
+	l.shadow_enabled = false
+	add_child(l)
+	l.global_position = base + Vector3(2.0, 1.6, 0.4)
+	Flicker.attach(l, 0.32, 1.2)
+	if rng.randf() < 0.6:
+		_place_chest(base + Vector3(-2.6, 0.45, 2.0), rng, c)
+
+## 병영 — 침상과 무기걸이
+func _room_barracks(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var mb := MeshBuilder.new()
+	var wood := Color(0.36, 0.27, 0.18)
+	for i in range(4):
+		var x := -2.7 + float(i) * 1.8
+		mb.box_up(Vector3(x, 0, 2.6), Vector3(1.2, 0.42, 2.2), wood)
+		mb.box_up(Vector3(x, 0.42, 3.4), Vector3(1.1, 0.18, 0.6),
+			Color(0.55, 0.50, 0.40))
+	# 무기걸이
+	mb.box_up(Vector3(0, 0, -3.2), Vector3(6.0, 0.2, 0.3), wood.darkened(0.1))
+	for i in range(5):
+		mb.cyl(Transform3D(Basis.IDENTITY, Vector3(-2.4 + float(i) * 1.2, 0.2, -3.2)),
+			0.05, 0.05, 1.6, 5, Color(0.48, 0.46, 0.44))
+	_mesh_at(mb, base, _wood_mat())
+	var mobs: Array = c["mobs"]
+	for i in range(rng.randi_range(2, 3)):
+		if mobs.is_empty():
+			break
+		var e := Enemy.spawn(str(mobs[rng.randi() % mobs.size()]), self,
+			base + Vector3(rng.randf_range(-3.0, 3.0), 0.3, rng.randf_range(-1.0, 2.5)))
+		if e:
+			e.set_meta("dungeon", true)
+
+## 우물방 — 가운데 깊은 구멍
+func _room_well(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	mb.cyl(Transform3D(Basis.IDENTITY, Vector3.ZERO), 1.8, 1.8, 0.9, 12,
+		stone.lightened(0.05))
+	mb.cyl(Transform3D(Basis.IDENTITY, Vector3(0, 0.9, 0)), 1.55, 1.55, 0.12, 12,
+		Color(0.05, 0.06, 0.07))
+	for sx in [-1.6, 1.6]:
+		mb.cyl(Transform3D(Basis.IDENTITY, Vector3(sx, 0.9, 0)), 0.09, 0.09, 2.0, 5,
+			Color(0.34, 0.26, 0.18))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, 2.9, 0)), Vector3(3.6, 0.16, 0.16),
+		Color(0.34, 0.26, 0.18))
+	_mesh_at(mb, base, _stone_mat())
+	if rng.randf() < 0.5:
+		_place_chest(base + Vector3(2.8, 0.45, 1.4), rng, c)
+
+## 열주실 — 기둥이 늘어선 큰 방
+func _room_pillar(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	for sx in [-2.4, 2.4]:
+		for sz in [-2.4, 2.4]:
+			mb.cyl(Transform3D(Basis.IDENTITY, Vector3(sx, 0, sz)), 0.55, 0.48,
+				WALL_H, 9, stone.lightened(0.04))
+			mb.box(Transform3D(Basis.IDENTITY, Vector3(sx, WALL_H - 0.2, sz)),
+				Vector3(1.4, 0.4, 1.4), stone.darkened(0.08))
+			mb.box(Transform3D(Basis.IDENTITY, Vector3(sx, 0.2, sz)),
+				Vector3(1.5, 0.4, 1.5), stone.darkened(0.08))
+	_mesh_at(mb, base, _stone_mat())
+	var mobs: Array = c["mobs"]
+	if not mobs.is_empty() and rng.randf() < 0.7:
+		var e := Enemy.spawn(str(mobs[rng.randi() % mobs.size()]), self,
+			base + Vector3(0, 0.3, 0))
+		if e:
+			e.set_meta("dungeon", true)
+
+## 붕괴실 — 무너진 천장과 잔해
+func _room_collapsed(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	for i in range(rng.randi_range(6, 10)):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(0.0, 3.4)
+		var sz := rng.randf_range(0.35, 0.9)
+		mb.rock(Vector3(cos(a) * d, sz * 0.4, sin(a) * d), sz, int(rng.randi()),
+			stone.darkened(rng.randf_range(0.0, 0.2)), 6, 4, 0.34,
+			Vector3(1.0, 0.6, 1.0))
+	# 무너져 기울어진 대들보
+	for i in range(2):
+		var a2 := rng.randf() * TAU
+		mb.rod(Vector3(cos(a2) * 3.0, 0.3, sin(a2) * 3.0),
+			Vector3(cos(a2) * 0.6, WALL_H * 0.75, sin(a2) * 0.6), 0.20, 5,
+			Color(0.32, 0.24, 0.16))
+	_mesh_at(mb, base, _stone_mat())
+
+## 연회실 — 긴 식탁과 의자
+func _room_banquet(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var mb := MeshBuilder.new()
+	var wood := Color(0.38, 0.28, 0.18)
+	mb.box_up(Vector3(0, 0.75, 0), Vector3(5.2, 0.16, 1.6), wood.lightened(0.08))
+	for i in range(4):
+		var x := -2.2 + float(i) * 1.47
+		for sz in [-0.6, 0.6]:
+			mb.cyl(Transform3D(Basis.IDENTITY, Vector3(x, 0, sz)), 0.09, 0.09, 0.75,
+				5, wood)
+	for i in range(6):
+		var x2 := -2.2 + float(i) * 0.9
+		var sz2 := 1.5 if i % 2 == 0 else -1.5
+		mb.box_up(Vector3(x2, 0, sz2), Vector3(0.5, 0.45, 0.5), wood.darkened(0.1))
+	_mesh_at(mb, base, _wood_mat())
+	if rng.randf() < 0.5:
+		_place_chest(base + Vector3(rng.randf_range(-3.0, 3.0), 0.45, 3.0), rng, c)
+
+## 사당 — 작은 신상과 공물
+func _room_shrine(base: Vector3, rng: RandomNumberGenerator, c: Dictionary,
+		light_col: Color) -> void:
+	var stone: Color = c["stone"]
+	var mb := MeshBuilder.new()
+	mb.box_up(Vector3.ZERO, Vector3(2.2, 0.5, 2.2), stone.darkened(0.08))
+	mb.box_up(Vector3(0, 0.5, 0), Vector3(1.0, 1.6, 0.8), stone.lightened(0.10))
+	mb.sphere(Vector3(0, 2.3, 0), 0.42, 7, 5, stone.lightened(0.16),
+		Vector3(1.0, 1.15, 1.0))
+	_mesh_at(mb, base, _stone_mat())
+	var l := OmniLight3D.new()
+	l.light_color = light_col
+	l.light_energy = 1.0
+	l.omni_range = 6.5
+	l.shadow_enabled = false
+	add_child(l)
+	l.global_position = base + Vector3(0, 2.4, 0)
+	Flicker.attach(l, 0.26, 0.9)
+	_place_chest(base + Vector3(0, 0.55, 1.6), rng, c)
+
+## 거미줄방 — 알집과 늘어진 실
+func _room_web(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var mb := MeshBuilder.new()
+	var web := Color(0.80, 0.80, 0.76)
+	for i in range(14):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(0.5, 3.6)
+		var p := Vector3(cos(a) * d, WALL_H - 0.2, sin(a) * d)
+		mb.rod(p, p + Vector3(rng.randf_range(-0.5, 0.5),
+			-rng.randf_range(1.0, 3.2), rng.randf_range(-0.5, 0.5)), 0.035, 4, web)
+	for i in range(rng.randi_range(2, 4)):
+		var a2 := rng.randf() * TAU
+		var d2 := rng.randf_range(0.4, 2.6)
+		mb.sphere(Vector3(cos(a2) * d2, rng.randf_range(0.3, 0.7), sin(a2) * d2),
+			rng.randf_range(0.28, 0.48), 6, 4, Color(0.72, 0.72, 0.64),
+			Vector3(1.0, 1.15, 1.0))
+	_mesh_at(mb, base, MatLib.flat(Color.WHITE, 0.92, 0.0, 0.0, "cloth"))
+	var mobs: Array = c["mobs"]
+	for i in range(rng.randi_range(1, 2)):
+		if mobs.is_empty():
+			break
+		var e := Enemy.spawn(str(mobs[rng.randi() % mobs.size()]), self,
+			base + Vector3(rng.randf_range(-2.5, 2.5), 0.3, rng.randf_range(-2.5, 2.5)))
+		if e:
+			e.set_meta("dungeon", true)
+
+## 유해방 — 바닥에 흩어진 뼈
+func _room_bones(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var mb := MeshBuilder.new()
+	var bone := Color(0.78, 0.76, 0.66)
+	for i in range(rng.randi_range(14, 22)):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(0.0, 3.6)
+		var p := Vector3(cos(a) * d, 0.06, sin(a) * d)
+		var a2 := rng.randf() * TAU
+		mb.rod(p, p + Vector3(cos(a2), 0.02, sin(a2)) * rng.randf_range(0.3, 0.8),
+			rng.randf_range(0.035, 0.07), 4, bone)
+		if rng.randf() < 0.25:
+			mb.sphere(p + Vector3(0, 0.12, 0), 0.16, 6, 4, bone, Vector3(1, 0.9, 1.1))
+	_mesh_at(mb, base, MatLib.flat(Color.WHITE, 0.92))
+	if rng.randf() < 0.4:
+		_place_chest(base + Vector3(rng.randf_range(-2.0, 2.0), 0.45,
+			rng.randf_range(-2.0, 2.0)), rng, c)
+
+## 저장고 — 통과 자루
+func _room_cellar(base: Vector3, rng: RandomNumberGenerator, c: Dictionary) -> void:
+	var mb := MeshBuilder.new()
+	var wood := Color(0.40, 0.29, 0.19)
+	for i in range(rng.randi_range(4, 7)):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(1.2, 3.4)
+		var p := Vector3(cos(a) * d, 0, sin(a) * d)
+		mb.cyl(Transform3D(Basis.IDENTITY, p), 0.42, 0.36, 1.0, 9, wood)
+		mb.cyl(Transform3D(Basis.IDENTITY, p + Vector3(0, 0.3, 0)), 0.45, 0.45, 0.08,
+			9, Color(0.32, 0.30, 0.28))
+		mb.cyl(Transform3D(Basis.IDENTITY, p + Vector3(0, 0.65, 0)), 0.44, 0.44, 0.08,
+			9, Color(0.32, 0.30, 0.28))
+	for i in range(rng.randi_range(2, 4)):
+		var a2 := rng.randf() * TAU
+		var d2 := rng.randf_range(0.6, 2.8)
+		mb.sphere(Vector3(cos(a2) * d2, 0.34, sin(a2) * d2), 0.42, 6, 4,
+			Color(0.62, 0.56, 0.42), Vector3(1.0, 0.85, 1.0))
+	_mesh_at(mb, base, _wood_mat())
+	_place_chest(base + Vector3(0, 0.45, 0), rng, c)
+
+## 관측실 — 천장이 뚫려 별빛이 들어온다
+func _room_observatory(base: Vector3, rng: RandomNumberGenerator,
+		light_col: Color) -> void:
+	var mb := MeshBuilder.new()
+	# 뚫린 천장 테두리
+	mb.cyl(Transform3D(Basis.IDENTITY, Vector3(0, WALL_H - 0.4, 0)), 2.2, 2.0, 0.6,
+		12, Color(0.40, 0.39, 0.37))
+	# 가운데 관측대
+	mb.cyl(Transform3D(Basis.IDENTITY, Vector3.ZERO), 1.2, 1.0, 0.7, 10,
+		Color(0.38, 0.37, 0.35))
+	mb.rod(Vector3(0, 0.7, 0), Vector3(0.6, 2.4, 0.4), 0.10, 6,
+		Color(0.50, 0.48, 0.44))
+	_mesh_at(mb, base, _stone_mat())
+	# 위에서 내려오는 창백한 빛
+	var l := OmniLight3D.new()
+	l.light_color = Color(0.72, 0.82, 1.0)
+	l.light_energy = 1.6
+	l.omni_range = 12.0
+	l.shadow_enabled = false
+	add_child(l)
+	l.global_position = base + Vector3(0, WALL_H - 1.0, 0)
+	var l2 := OmniLight3D.new()
+	l2.light_color = light_col
+	l2.light_energy = 0.5
+	l2.omni_range = 5.0
+	l2.shadow_enabled = false
+	add_child(l2)
+	l2.global_position = base + Vector3(0, 1.2, 0)
 
 func entry_point() -> Vector3:
 	return origin + Vector3(0, 1.0, 2.0)
