@@ -578,10 +578,13 @@ func _apply_terrain(center: Vector3, radius: float, mode: String,
 	if not stats.use_stamina(cost):
 		Sfx.play("error", -14.0)
 		return
-	var keys := GameState.gen.modify(center, radius, mode, amount)
-	var cm = get_tree().current_scene.get_node_or_null("chunks")
-	if cm != null:
-		cm.rebuild(keys)
+	# 온라인이면 호스트가 판정한 뒤 모두에게 적용한다.
+	# 클라이언트는 여기서 로컬 적용을 건너뛰고 승인된 결과를 받는다.
+	if not Net.request_terrain(center, radius, mode, amount):
+		var keys := GameState.gen.modify(center, radius, mode, amount)
+		var cm = get_tree().current_scene.get_node_or_null("chunks")
+		if cm != null:
+			cm.rebuild(keys)
 	Sfx.play_at("build", center, get_tree().current_scene, -6.0, 0.8)
 	Fx.burst(get_tree().current_scene, center + Vector3(0, 0.3, 0),
 		Color(0.52, 0.42, 0.28), 14, 3.0, 0.08, 0.8)

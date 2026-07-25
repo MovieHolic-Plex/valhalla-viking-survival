@@ -11,6 +11,8 @@ var ui: UIRoot
 
 var _title: CanvasLayer
 var _seed_edit: LineEdit
+var _name_edit: LineEdit
+var _ip_edit: LineEdit
 var _loading: Label
 var started := false
 
@@ -26,6 +28,8 @@ func _handle_cli() -> void:
 	var auto := false
 	var sv := 424242
 	var shots := ""
+	var net_host := false
+	var net_join := ""
 	for a in args:
 		if a == "--diag":
 			_diag()
@@ -37,6 +41,30 @@ func _handle_cli() -> void:
 		elif a.begins_with("--shots="):
 			shots = a.substr(8)
 			auto = true
+		elif a == "--host":
+			net_host = true
+			auto = true
+		elif a.begins_with("--join="):
+			net_join = a.substr(7)
+			auto = true
+
+	# 멀티플레이 자동 검증 경로
+	if net_host:
+		_seed_edit.text = str(sv)
+		await get_tree().process_frame
+		Net.my_name = "호스트"
+		Net.host_game()
+		_begin(false)
+		add_child(NetProbe.new())
+		return
+	if net_join != "":
+		await get_tree().process_frame
+		Net.my_name = "손님"
+		_ip_edit.text = net_join
+		_begin_join()
+		add_child(NetProbe.new())
+		return
+
 	if not auto:
 		return
 	_seed_edit.text = str(sv)
@@ -124,6 +152,40 @@ func _make_title() -> void:
 		b_cont.pressed.connect(func(): _begin(true))
 		v.add_child(b_cont)
 
+	# ── 멀티플레이 ──
+	v.add_child(UITheme.label("", 8))
+	var mp := UITheme.label(tr("UI_MULTIPLAYER"), 16, UITheme.TEXT_DIM)
+	mp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(mp)
+
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 8)
+	v.add_child(name_row)
+	var nl := UITheme.label(tr("UI_NICKNAME"), 15)
+	nl.custom_minimum_size = Vector2(60, 0)
+	name_row.add_child(nl)
+	_name_edit = LineEdit.new()
+	_name_edit.text = Net.my_name
+	_name_edit.custom_minimum_size = Vector2(150, 36)
+	name_row.add_child(_name_edit)
+	var b_host := UITheme.button(tr("UI_HOST"), 15)
+	b_host.pressed.connect(func(): _begin_host())
+	name_row.add_child(b_host)
+
+	var join_row := HBoxContainer.new()
+	join_row.add_theme_constant_override("separation", 8)
+	v.add_child(join_row)
+	var il := UITheme.label(tr("UI_IP"), 15)
+	il.custom_minimum_size = Vector2(60, 0)
+	join_row.add_child(il)
+	_ip_edit = LineEdit.new()
+	_ip_edit.text = "127.0.0.1"
+	_ip_edit.custom_minimum_size = Vector2(150, 36)
+	join_row.add_child(_ip_edit)
+	var b_join := UITheme.button(tr("UI_JOIN"), 15)
+	b_join.pressed.connect(func(): _begin_join())
+	join_row.add_child(b_join)
+
 	var b_exit := UITheme.button(tr("UI_EXIT"), 18)
 	b_exit.custom_minimum_size = Vector2(0, 44)
 	b_exit.pressed.connect(func(): get_tree().quit())
@@ -201,6 +263,52 @@ func _begin(from_save: bool) -> void:
 		else int(_seed_edit.text)
 	_start_world(sv, from_save)
 
+## 호스트로 시작: 평소처럼 월드를 만든 뒤 서버를 연다
+func _begin_host() -> void:
+	if started:
+		return
+	Net.my_name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" \
+		else "바이킹"
+	if not Net.host_game(Net.DEFAULT_PORT, Net.my_name):
+		return
+	_begin(false)
+
+## 클라이언트로 접속: 서버가 시드를 보내주면 그때 월드를 만든다
+func _begin_join() -> void:
+	if started:
+		return
+	Net.my_name = _name_edit.text.strip_edges() if _name_edit.text.strip_edges() != "" \
+		else "바이킹"
+	var ip := _ip_edit.text.strip_edges()
+	if ip == "":
+		ip = "127.0.0.1"
+	if not Net.join_game(ip, Net.DEFAULT_PORT, Net.my_name):
+		return
+	_loading.text = tr("MSG_NET_CONNECTING") % ip
+	_loading.visible = true
+	if not Net.world_received.is_connected(_on_world_received):
+		Net.world_received.connect(_on_world_received)
+	if not Net.connection_failed.is_connected(_on_join_failed):
+		Net.connection_failed.connect(_on_join_failed)
+
+func _on_world_received(sv: int, time: float, day: int, mods: Array) -> void:
+	if started:
+		return
+	started = true
+	_loading.text = tr("UI_LOADING")
+	await get_tree().process_frame
+	_start_world(sv, false)
+	GameState.time_of_day = time
+	GameState.day = day
+	if GameState.gen != null:
+		GameState.gen.mods_from_array(mods)
+		if chunks != null and not mods.is_empty():
+			chunks.rebuild(GameState.gen.mod_chunks.keys())
+	Net.announce_ready()
+
+func _on_join_failed() -> void:
+	_loading.visible = false
+
 # ═══════════════════════════════════════════════ 세계 생성
 func _start_world(sv: int, from_save: bool) -> void:
 	GameState.new_world(sv)
@@ -257,6 +365,8 @@ func _start_world(sv: int, from_save: bool) -> void:
 	_title.queue_free()
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	GameState.msg(tr("MSG_WELCOME"))
+	if Net.is_host:
+		Net.announce_ready()
 
 	# 은은한 바람 소리
 	var wind := AudioStreamPlayer.new()

@@ -16,6 +16,10 @@ var death_ui: PanelContainer
 var powers_ui: PanelContainer
 var _dim: ColorRect
 var _root: Control
+var chat_log: RichTextLabel      # 멀티플레이 채팅 기록
+var chat_edit: LineEdit
+var _chat_box: VBoxContainer
+var _chat_fade := 0.0
 var _center: CenterContainer     # 중앙 정렬 패널 컨테이너
 var _bottom: CenterContainer     # 하단 정렬(건축 패널)
 
@@ -74,6 +78,63 @@ func _ready() -> void:
 	_make_powers()
 	_make_pause()
 	_make_death()
+	_make_chat()
+
+## 멀티플레이 채팅. 온라인이 아니면 만들어만 두고 숨겨둔다.
+func _make_chat() -> void:
+	_chat_box = VBoxContainer.new()
+	_chat_box.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
+	_chat_box.position = Vector2(18, -320)
+	_chat_box.custom_minimum_size = Vector2(430, 0)
+	_chat_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_chat_box)
+
+	chat_log = RichTextLabel.new()
+	chat_log.bbcode_enabled = true
+	chat_log.fit_content = false
+	chat_log.scroll_following = true
+	chat_log.custom_minimum_size = Vector2(430, 150)
+	chat_log.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chat_log.modulate = Color(1, 1, 1, 0)
+	_chat_box.add_child(chat_log)
+
+	chat_edit = LineEdit.new()
+	chat_edit.custom_minimum_size = Vector2(430, 34)
+	chat_edit.placeholder_text = tr("UI_CHAT_HINT")
+	chat_edit.visible = false
+	chat_edit.text_submitted.connect(_on_chat_submit)
+	_chat_box.add_child(chat_edit)
+
+	Net.chat_received.connect(_on_chat_received)
+
+func _on_chat_received(pname: String, text: String) -> void:
+	if chat_log == null:
+		return
+	chat_log.append_text("[color=#d8c48a]%s[/color]: %s\n" % [pname, text])
+	_chat_fade = 9.0
+	chat_log.modulate = Color(1, 1, 1, 1)
+
+func _on_chat_submit(text: String) -> void:
+	Net.say(text)
+	chat_edit.text = ""
+	close_chat()
+
+func open_chat() -> void:
+	if not Net.is_online:
+		return
+	chat_edit.visible = true
+	chat_edit.grab_focus()
+	chat_log.modulate = Color(1, 1, 1, 1)
+	_chat_fade = 9.0
+	player.input_locked = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+func close_chat() -> void:
+	chat_edit.visible = false
+	chat_edit.release_focus()
+	if _open_panels.is_empty():
+		player.input_locked = false
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func bind(p: Player, bs: BuildSystem) -> void:
 	player = p
@@ -104,12 +165,22 @@ func _unhandled_input(event: InputEvent) -> void:
 			open_panel(map_ui)
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("ui_cancel"):
+		if chat_edit != null and chat_edit.visible:
+			close_chat()
+			get_viewport().set_input_as_handled()
+			return
 		if not _open_panels.is_empty():
 			close_all()
 		else:
 			toggle_pause()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and not event.echo:
+		# Enter: 멀티플레이 채팅 (온라인일 때만)
+		if event.keycode == KEY_ENTER and Net.is_online and _open_panels.is_empty():
+			if chat_edit != null and not chat_edit.visible:
+				open_chat()
+				get_viewport().set_input_as_handled()
+				return
 		match event.keycode:
 			KEY_F5:
 				SaveSystem.save_game(player, build_system)
@@ -140,6 +211,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				return
 
 func _process(_delta: float) -> void:
+	# 채팅 로그는 잠시 뒤 흐려진다 (입력창이 열려 있으면 유지)
+	if chat_log != null:
+		if chat_edit != null and chat_edit.visible:
+			_chat_fade = 9.0
+		elif _chat_fade > 0.0:
+			_chat_fade -= _delta
+			chat_log.modulate.a = clampf(_chat_fade / 2.0, 0.0, 1.0)
 	if build_system != null and build_system.active and _open_panels.is_empty():
 		hud.set_build_hint(tr("UI_BUILD_KEYS"))
 	else:

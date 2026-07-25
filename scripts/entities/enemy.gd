@@ -33,6 +33,12 @@ var _rng := RandomNumberGenerator.new()
 var _stuck_t := 0.0
 var _last_p := Vector3.ZERO
 
+# ── 멀티플레이 ──
+var net_id := 0            # 0 = 로컬 전용
+var net_remote := false    # true 면 AI 를 돌리지 않고 받은 좌표만 따른다
+var _net_pos := Vector3.ZERO
+var _net_yaw := 0.0
+
 # ── 길들이기 / 번식 ──
 var tamed := false
 var tame_progress := 0
@@ -50,6 +56,10 @@ static func spawn(id: String, parent: Node, pos: Vector3) -> Enemy:
 	e.cfg = c
 	parent.add_child(e)
 	e.global_position = pos
+	# 호스트에서 만들어진 몬스터는 모든 접속자에게 재현시킨다.
+	# (Net 이 원격 재현으로 만든 개체는 net_id 가 이미 붙어 있어 중복 등록되지 않는다)
+	if Net.is_online and Net.is_host and e.net_id == 0:
+		Net.register_enemy(e)
 	return e
 
 func _ready() -> void:
@@ -153,6 +163,11 @@ func _physics_process(delta: float) -> void:
 		_death_update(delta)
 		return
 
+	# 클라이언트에서는 AI 를 돌리지 않는다. 호스트가 보낸 좌표로 보간만 한다.
+	if net_remote:
+		_net_update(delta)
+		return
+
 	_atk_cd = maxf(0.0, _atk_cd - delta)
 	_timer -= delta
 	if _stagger_time > 0.0:
@@ -186,6 +201,30 @@ func _physics_process(delta: float) -> void:
 
 	var sp: float = Vector3(velocity.x, 0, velocity.z).length() / maxf(float(cfg.get("run", 4.0)), 0.1)
 	anim.update(delta, clampf(sp, 0.0, 1.0), not is_on_floor() and not _flying, false)
+
+## 호스트가 보낸 상태를 반영한다
+func net_apply(pos: Vector3, yaw: float, hp_frac: float) -> void:
+	_net_pos = pos
+	_net_yaw = yaw
+	hp = clampf(hp_frac, 0.0, 1.0) * max_hp
+	if global_position.distance_to(pos) > 30.0:
+		global_position = pos
+
+## 호스트가 "죽었다"고 알려왔을 때. 로컬 사망 연출만 재생한다.
+func net_kill() -> void:
+	if _dead:
+		return
+	hp = 0.0
+	_die(null)
+
+func _net_update(delta: float) -> void:
+	var t: float = clampf(delta * 10.0, 0.0, 1.0)
+	global_position = global_position.lerp(_net_pos, t)
+	if rig != null:
+		rig.rotation.y = lerp_angle(rig.rotation.y, _net_yaw, t)
+	var sp: float = clampf(_net_pos.distance_to(global_position) * 2.0, 0.0, 1.0)
+	if anim != null:
+		anim.update(delta, sp, false, false)
 
 func _acquire_target() -> void:
 	if tamed:
@@ -531,6 +570,9 @@ func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
 		knockback: float = 0.0) -> void:
 	if _dead:
 		return
+	# 클라이언트에서는 판정을 하지 않고 호스트에 요청만 한다
+	if Net.hit_enemy(self, dmg, from_pos, knockback):
+		return
 	var total := 0.0
 	for k in dmg:
 		total += float(dmg[k])
@@ -597,7 +639,9 @@ func _die(killer) -> void:
 		clampf(1.4 / maxf(_size, 0.5), 0.5, 1.6))
 	Fx.burst(get_tree().current_scene, global_position + Vector3(0, 1.0 * _size, 0),
 		Color(0.55, 0.12, 0.12), 24, 4.5, 0.09, 1.2)
-	_drop_loot()
+	if not net_remote:
+		_drop_loot()
+	Net.enemy_died(self)
 	died.emit(self)
 
 func _drop_loot() -> void:

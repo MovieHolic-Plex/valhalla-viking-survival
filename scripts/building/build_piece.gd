@@ -5,6 +5,7 @@ extends StaticBody3D
 signal removed(piece)
 
 var piece_id := "wood_floor"
+var net_id := 0        # 멀티플레이 동기화 ID (0 = 로컬 전용)
 var data: Dictionary = {}
 var hp := 100.0
 var max_hp := 100.0

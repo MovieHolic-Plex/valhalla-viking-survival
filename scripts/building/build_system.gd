@@ -211,19 +211,40 @@ func try_place() -> bool:
 		Sfx.play_at("build", boat.global_position, get_tree().current_scene, -2.0)
 		return true
 
-	var piece := BuildPiece.make(current_id)
-	get_tree().current_scene.add_child(piece)
+	# 클라이언트는 직접 놓지 않고 호스트에 요청한다(호스트가 승인해 되돌려준다)
+	if Net.request_place(current_id, _place_xf.origin, rot_step):
+		GameState.stats["built"] = int(GameState.stats["built"]) + 1
+		Sfx.play_at("build", _place_xf.origin, get_tree().current_scene, -4.0)
+		return true
+
+	var piece := _spawn_piece(current_id, _place_xf.origin, rot_step)
 	piece.global_transform = _place_xf
 	piece.yaw = rot_step
-	piece.rotation.y = rot_step
-	piece.removed.connect(_on_piece_removed)
-	pieces.append(piece)
 	GameState.stats["built"] = int(GameState.stats["built"]) + 1
 	Sfx.play_at("build", _place_xf.origin, get_tree().current_scene, -4.0)
 	Fx.burst(get_tree().current_scene, _place_xf.origin, Color(0.7, 0.6, 0.4), 10, 2.5,
 		0.06, 0.6)
 	recompute_support()
+	Net.piece_placed(piece)
 	return true
+
+## 조각 하나를 실제로 만들어 씬에 넣는다. 로컬/원격 경로가 공유한다.
+func _spawn_piece(id: String, pos: Vector3, yaw: float) -> BuildPiece:
+	var piece := BuildPiece.make(id)
+	get_tree().current_scene.add_child(piece)
+	piece.global_position = pos
+	piece.rotation.y = yaw
+	piece.yaw = yaw
+	piece.removed.connect(_on_piece_removed)
+	pieces.append(piece)
+	return piece
+
+## 네트워크로 받은 배치. 자원 소모/유효성 검사 없이 그대로 재현한다.
+func place_remote(id: String, pos: Vector3, yaw: float) -> BuildPiece:
+	var piece := _spawn_piece(id, pos, yaw)
+	Sfx.play_at("build", pos, get_tree().current_scene, -8.0)
+	call_deferred("recompute_support")
+	return piece
 
 func try_remove() -> bool:
 	var hit := _aim()
@@ -232,6 +253,12 @@ func try_remove() -> bool:
 	var col = hit["collider"]
 	if col == null or not (col is BuildPiece):
 		return false
+	# 온라인이면 호스트가 판정해서 모두에게 알린다
+	if Net.is_online and col.net_id > 0:
+		Net.piece_removed(col)
+		if not Net.is_host:
+			return true
+		return true
 	col.destroy(true)
 	return true
 
