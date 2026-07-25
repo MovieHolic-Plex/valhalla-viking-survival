@@ -394,6 +394,142 @@ func _build() -> void:
 	_mat("dandelion", 0.1, Color(0.95, 0.85, 0.25))
 	_food("cloudberry", 12, 40, 1000, 1.0, Color(0.92, 0.72, 0.25))
 
+
+	# ── 확장: 채집물 · 부산물 ───────────────────────────────
+	_mat("birch_seeds", 0.1, Color(0.72, 0.78, 0.52))
+	_mat("fir_cone", 0.1, Color(0.38, 0.30, 0.20))
+	_mat("raspberry_seeds", 0.1, Color(0.82, 0.28, 0.34))
+	_mat("vine_seeds", 0.1, Color(0.45, 0.68, 0.36))
+	_mat("jute_red", 0.3, Color(0.72, 0.20, 0.22))
+	_mat("jute_blue", 0.3, Color(0.24, 0.32, 0.68))
+	_mat("leather_belt", 1.0, Color(0.48, 0.34, 0.22), 20)
+	_mat("wisp", 0.1, Color(0.90, 0.95, 0.70), 20)
+	_mat("root", 1.0, Color(0.40, 0.34, 0.22))
+	_mat("iron_ingot_scrap", 4.0, Color(0.52, 0.50, 0.48), 30, false)
+	_mat("tar", 1.0, Color(0.10, 0.09, 0.08))
+	_mat("bat_wing", 0.3, Color(0.28, 0.22, 0.26))
+	_mat("serpent_scale", 1.0, Color(0.30, 0.58, 0.52))
+	_mat("serpent_trophy_scale", 2.0, Color(0.26, 0.52, 0.46), 20)
+	_mat("bone_mass", 3.0, Color(0.72, 0.72, 0.60), 20)
+	_mat("chitin", 2.0, Color(0.62, 0.55, 0.30))
+	_mat("marble", 3.0, Color(0.90, 0.88, 0.84), 50, false)
+	_mat("grausten", 3.0, Color(0.45, 0.44, 0.42), 50, false)
+	_mat("ceramic_plate", 2.0, Color(0.78, 0.72, 0.62), 20)
+	_mat("proustite", 2.0, Color(0.72, 0.28, 0.24), 30, false)
+
+	# ── 확장: 보물 (던전 상자) ──────────────────────────────
+	_mat("ruby", 0.3, Color(0.85, 0.12, 0.22), 20)
+	_mat("amber", 0.3, Color(0.92, 0.62, 0.18), 20)
+	_mat("amber_pearl", 0.3, Color(0.96, 0.76, 0.32), 20)
+	_mat("coins", 0.1, Color(0.92, 0.80, 0.30), 999)
+	_mat("silver_necklace", 0.5, Color(0.88, 0.90, 0.94), 10)
+
+	# ── 확장: 물고기 ────────────────────────────────────────
+	_food("perch", 18, 9, 700, 1.0, Color(0.58, 0.68, 0.52))
+	_food("pike", 24, 11, 800, 1.0, Color(0.48, 0.58, 0.44))
+	_food("tuna", 30, 14, 900, 1.0, Color(0.42, 0.52, 0.66))
+	_food("trollfish", 28, 12, 900, 1.0, Color(0.46, 0.56, 0.48))
+	_food("magmafish", 40, 18, 1000, 1.0, Color(0.90, 0.42, 0.18))
+	_food("northern_salmon", 34, 16, 950, 1.0, Color(0.88, 0.48, 0.40))
+	_food("cooked_perch", 40, 20, 1200, 2.0, Color(0.72, 0.66, 0.50))
+	_food("cooked_pike", 48, 24, 1300, 2.0, Color(0.70, 0.64, 0.48))
+	_food("cooked_tuna", 55, 28, 1400, 3.0, Color(0.66, 0.62, 0.56))
+	_food("cooked_magmafish", 78, 34, 1600, 4.0, Color(0.82, 0.52, 0.28))
+
+	# ── 확장: 요리 ──────────────────────────────────────────
+	_food("grilled_neck_tail", 26, 16, 1000, 2.0, Color(0.72, 0.62, 0.42))
+	_food("honey_glazed_chicken", 60, 34, 1600, 3.0, Color(0.86, 0.62, 0.28))
+	_food("boar_jerky", 23, 23, 1400, 2.0, Color(0.60, 0.34, 0.24))
+	_food("deer_stew", 45, 40, 1600, 3.0, Color(0.62, 0.42, 0.28))
+	_food("minced_meat_sauce", 55, 40, 1600, 3.0, Color(0.68, 0.30, 0.26))
+	_food("bread_and_honey", 46, 34, 1500, 2.0, Color(0.90, 0.76, 0.42))
+	_food("mushroom_stew", 40, 30, 1500, 2.0, Color(0.80, 0.70, 0.52))
+	_food("berry_pie", 34, 46, 1500, 2.0, Color(0.78, 0.32, 0.42))
+	_food("wolf_skewer", 58, 34, 1600, 3.0, Color(0.60, 0.38, 0.24))
+	_food("serpent_stew", 80, 44, 1800, 4.0, Color(0.48, 0.66, 0.52))
+	_food("fish_and_bread", 62, 52, 1700, 3.0, Color(0.80, 0.72, 0.56))
+	_food("blood_sausage", 68, 30, 1700, 3.0, Color(0.48, 0.16, 0.20))
+	_food("misthare_supreme", 85, 60, 1800, 4.0, Color(0.72, 0.68, 0.82))
+	items["misthare_supreme"]["eitr"] = 35.0
+	_food("yggdrasil_porridge", 55, 40, 1800, 3.0, Color(0.62, 0.80, 0.58))
+	items["yggdrasil_porridge"]["eitr"] = 65.0
+	_food("seeker_aspic", 60, 46, 1800, 3.0, Color(0.55, 0.62, 0.32))
+	items["seeker_aspic"]["eitr"] = 45.0
+
+	# ── 확장: 벌꿀술 ────────────────────────────────────────
+	_add("mead_tasty", {"t": T.CONSUMABLE, "st": 10, "w": 1.0, "col": Color(0.92, 0.72, 0.30),
+		"potion": {"stam": 40.0, "over": 5.0}})
+	_add("mead_medium_health", {"t": T.CONSUMABLE, "st": 10, "w": 1.0,
+		"col": Color(0.85, 0.20, 0.26), "potion": {"heal": 75.0, "over": 10.0}})
+	_add("mead_minor_eitr", {"t": T.CONSUMABLE, "st": 10, "w": 1.0,
+		"col": Color(0.62, 0.52, 0.95), "potion": {"eitr": 60.0, "over": 10.0}})
+	_add("mead_lingering_stamina", {"t": T.CONSUMABLE, "st": 10, "w": 1.0,
+		"col": Color(0.95, 0.85, 0.35), "potion": {"stam": 160.0, "over": 20.0}})
+	_add("mead_bzerker", {"t": T.CONSUMABLE, "st": 10, "w": 1.0,
+		"col": Color(0.85, 0.35, 0.15), "potion": {"rage": 1.5, "dur": 60.0}})
+
+	# ── 확장: 무기 ──────────────────────────────────────────
+	_wep("wood_club", S.CLUBS, {D.BLUNT: 12.0}, 1.2, 10.0, 2.0, 30.0, Color(0.42, 0.30, 0.18), {"wood": 3})
+	_wep("bone_knife", S.KNIVES, {D.PIERCE: 16.0, D.SLASH: 8.0}, 1.95, 8.0, 1.8, 12.0, Color(0.80, 0.78, 0.68), {"bone_fragments": 6})
+	_wep("bronze_knife", S.KNIVES, {D.PIERCE: 22.0, D.SLASH: 16.0}, 1.95, 9.0, 1.9, 14.0, Color(0.80, 0.55, 0.22), {"bronze": 2})
+	_wep("iron_knife", S.KNIVES, {D.PIERCE: 32.0, D.SLASH: 24.0}, 2.0, 10.0, 1.9, 15.0, Color(0.62, 0.62, 0.64), {"iron": 3})
+	_wep("silver_knife", S.KNIVES, {D.PIERCE: 42.0, D.SPIRIT: 20.0}, 2.0, 11.0, 2.0, 16.0, Color(0.86, 0.88, 0.92), {"silver": 3})
+	_wep("blackmetal_knife", S.KNIVES, {D.PIERCE: 55.0, D.SLASH: 30.0}, 2.05, 12.0, 2.0, 18.0, Color(0.24, 0.24, 0.28), {"black_metal": 3})
+	_wep("bronze_spear", S.SPEARS, {D.PIERCE: 34.0}, 1.05, 17.0, 3.2, 32.0, Color(0.80, 0.55, 0.22), {"bronze": 3})
+	_wep("ancient_bark_spear", S.SPEARS, {D.PIERCE: 40.0, D.POISON: 20.0}, 1.05, 18.0, 3.3, 30.0, Color(0.30, 0.26, 0.20), {"ancient_bark": 6, "iron": 2})
+	_wep("blackmetal_spear", S.SPEARS, {D.PIERCE: 78.0}, 1.0, 22.0, 3.5, 40.0, Color(0.24, 0.24, 0.28), {"black_metal": 4})
+	_wep("battleaxe_crystal", S.AXES, {D.BLUNT: 90.0, D.SLASH: 40.0}, 0.75, 30.0, 3.0, 90.0, Color(0.70, 0.92, 1.00), {"crystal": 6, "silver": 4}, 4)
+	_wep("porcupine", S.CLUBS, {D.BLUNT: 55.0, D.PIERCE: 40.0}, 0.95, 24.0, 2.4, 70.0, Color(0.55, 0.52, 0.48), {"iron": 4, "needle": 6})
+	_wep("dagger_dyrnwyn", S.SWORDS, {D.SLASH: 82.0, D.FIRE: 55.0}, 1.25, 20.0, 2.5, 42.0, Color(1.00, 0.55, 0.20), {"flametal": 4, "surtling_core": 4})
+	_wep("stagbreaker", S.CLUBS, {D.BLUNT: 60.0}, 0.7, 30.0, 2.6, 100.0, Color(0.70, 0.62, 0.42), {"wood": 8, "hard_antler": 4})
+	_wep("crystal_battleaxe", S.AXES, {D.SLASH: 100.0, D.FROST: 30.0}, 0.72, 32.0, 3.1, 95.0, Color(0.72, 0.90, 1.00), {"crystal": 8}, 5)
+
+	# ── 확장: 화살 · 볼트 ───────────────────────────────────
+	_ammo("bone_arrow", {D.PIERCE: 26.0}, Color(0.84, 0.82, 0.72))
+	_ammo("silver_arrow", {D.PIERCE: 58.0, D.SPIRIT: 20.0}, Color(0.88, 0.90, 0.94))
+	_ammo("carapace_arrow", {D.PIERCE: 72.0}, Color(0.32, 0.34, 0.24))
+	_ammo("flametal_arrow", {D.PIERCE: 68.0, D.FIRE: 40.0}, Color(0.95, 0.42, 0.15))
+
+	# ── 확장: 방패 ──────────────────────────────────────────
+	_shield("bronze_buckler", 20.0, 2.4, Color(0.80, 0.55, 0.22), {"bronze": 6})
+	_shield("bone_tower_shield", 38.0, 1.2, Color(0.82, 0.80, 0.70), {"withered_bone": 10, "iron": 4})
+	_shield("serpent_scale_shield", 46.0, 1.4, Color(0.32, 0.58, 0.52), {"serpent_scale": 12, "iron": 4})
+	_shield("flametal_shield", 62.0, 1.6, Color(0.95, 0.45, 0.18), {"flametal": 8, "yggdrasil_wood": 8})
+
+	# ── 확장: 방어구 ────────────────────────────────────────
+	_armor("root_mask", 6.0, A.HEAD, 0.0, Color(0.42, 0.36, 0.24), {"root": 6, "ancient_bark": 4},
+		{"res_poison": 0.5})
+	_armor("root_harnesk", 6.0, A.CHEST, 0.0, Color(0.42, 0.36, 0.24), {"root": 10, "ancient_bark": 6},
+		{"res_poison": 0.5})
+	_armor("root_leggings", 6.0, A.LEGS, 0.0, Color(0.42, 0.36, 0.24), {"root": 10, "ancient_bark": 6})
+	_armor("linen_hood", 20.0, A.HEAD, 0.0, Color(0.88, 0.86, 0.76), {"linen_thread": 10})
+	_armor("fenris_hood", 16.0, A.HEAD, 0.05, Color(0.66, 0.62, 0.60), {"wolf_pelt": 4, "wolf_fang": 2},
+		{"res_fire": 0.5})
+	_armor("fenris_coat", 16.0, A.CHEST, 0.05, Color(0.66, 0.62, 0.60), {"wolf_pelt": 8, "wolf_fang": 4})
+	_armor("fenris_leggings", 16.0, A.LEGS, 0.05, Color(0.66, 0.62, 0.60), {"wolf_pelt": 8, "wolf_fang": 4})
+	_armor("eitr_weave_hood", 24.0, A.HEAD, 0.0, Color(0.62, 0.55, 0.90), {"eitr": 8, "linen_thread": 10})
+	_armor("eitr_weave_robe", 24.0, A.CHEST, 0.0, Color(0.62, 0.55, 0.90), {"eitr": 12, "linen_thread": 16})
+	_armor("eitr_weave_trousers", 24.0, A.LEGS, 0.0, Color(0.62, 0.55, 0.90), {"eitr": 12, "linen_thread": 16})
+	_armor("flametal_helmet", 30.0, A.HEAD, -0.05, Color(0.95, 0.45, 0.18), {"flametal": 8, "ceramic_plate": 4})
+	_armor("flametal_cuirass", 30.0, A.CHEST, -0.05, Color(0.95, 0.45, 0.18), {"flametal": 14, "ceramic_plate": 6})
+	_armor("flametal_greaves", 30.0, A.LEGS, -0.05, Color(0.95, 0.45, 0.18), {"flametal": 14, "ceramic_plate": 6})
+	_armor("linen_cape", 2.0, A.CAPE, 0.0, Color(0.90, 0.88, 0.78), {"linen_thread": 20, "silver": 2})
+	_armor("ash_cape", 3.0, A.CAPE, 0.0, Color(0.45, 0.22, 0.16), {"flametal": 4, "charred_bone": 10},
+		{"res_fire": 1.0})
+
+	# ── 확장: 트로피 ────────────────────────────────────────
+	_trophy("trophy_serpent", Color(0.32, 0.58, 0.52))
+	_trophy("trophy_leech", Color(0.45, 0.20, 0.28))
+	_trophy("trophy_surtling", Color(1.00, 0.50, 0.15))
+	_trophy("trophy_bat", Color(0.30, 0.24, 0.28))
+	_trophy("trophy_hare", Color(0.78, 0.76, 0.72))
+	_trophy("trophy_gjall", Color(0.62, 0.30, 0.22))
+	_trophy("trophy_tick", Color(0.50, 0.42, 0.26))
+	_trophy("trophy_dvergr", Color(0.55, 0.58, 0.62))
+	_trophy("trophy_asksvin", Color(0.60, 0.48, 0.38))
+	_trophy("trophy_charred", Color(0.30, 0.20, 0.18))
+	_trophy("trophy_fader", Color(0.90, 0.55, 0.25))
+
 	# ── 건축 자재(아이템 형태) ───────────────────────────────
 	for bid in ["wood_wall", "wood_floor", "wood_roof", "wood_beam", "wood_door",
 			"stone_wall", "stone_floor", "workbench", "forge", "campfire",

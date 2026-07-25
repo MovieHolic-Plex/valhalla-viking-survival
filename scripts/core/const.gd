@@ -40,7 +40,7 @@ const BIOME_KEY := {
 const BIOME_GROUND := {
 	Biome.OCEAN: Color(0.34, 0.31, 0.23),
 	Biome.MEADOWS: Color(0.215, 0.255, 0.105),
-	Biome.BLACKFOREST: Color(0.115, 0.155, 0.090),
+	Biome.BLACKFOREST: Color(0.140, 0.185, 0.105),
 	Biome.SWAMP: Color(0.150, 0.145, 0.095),
 	Biome.MOUNTAIN: Color(0.780, 0.815, 0.870),
 	Biome.PLAINS: Color(0.430, 0.385, 0.175),

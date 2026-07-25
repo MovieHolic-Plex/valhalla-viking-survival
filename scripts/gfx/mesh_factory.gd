@@ -40,34 +40,42 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				trunk.rod(Vector3(0, by, 0),
 					Vector3(cos(ba), -0.25, sin(ba)) * h * 0.10 + Vector3(0, by, 0),
 					r * 0.16, 4, bark.darkened(0.25))
-			# 층을 촘촘히 겹치고 각 층을 조금씩 흔들어야 기하학적으로 안 보인다
-			var lc := Color(0.055, 0.115, 0.090)
-			var layers := 11
+			# 잎은 솔리드 원뿔이 아니라 아래로 처진 잎 카드 다발이다.
+			# 발헤임 침엽수의 부슬부슬한 실루엣이 여기서 나온다.
+			var lc := Color(0.075, 0.150, 0.115)
+			var layers := 9
 			for i in range(layers):
 				var t := float(i) / float(layers - 1)
-				var y: float = lerp(h * 0.28, h * 0.99, t)
-				var rr: float = lerp(h * 0.215, h * 0.030, pow(t, 0.85))
-				var hh: float = lerp(h * 0.185, h * 0.085, t)
-				var jit := Vector3(rng.randf_range(-1.0, 1.0), 0.0,
-					rng.randf_range(-1.0, 1.0)) * rr * 0.14
-				var bs := Basis(Vector3.UP, rng.randf() * TAU)
-				leaf.cone(Transform3D(bs, Vector3(0, y, 0) + jit), rr, hh, 7,
-					_shade(lc, 1.0 + t * 0.55 + rng.randf_range(-0.12, 0.12)))
+				var y: float = lerp(h * 0.26, h * 0.98, t)
+				var rr: float = lerp(h * 0.26, h * 0.045, pow(t, 0.80))
+				var per := 7 - int(t * 3.0)
+				for j in range(per):
+					var a := TAU * float(j) / float(per) + rng.randf_range(-0.4, 0.4) + t * 1.7
+					var d := rr * rng.randf_range(0.45, 1.0)
+					var p := Vector3(cos(a) * d, y + rng.randf_range(-0.3, 0.3), sin(a) * d)
+					var sz := rr * rng.randf_range(1.1, 1.7)
+					# 가지가 아래로 처지도록 피치를 준다
+					leaf.card(p, sz, sz * 0.75, -a + PI * 0.5,
+						rng.randf_range(0.9, 1.35),
+						_shade(lc, 0.85 + t * 0.45 + rng.randf_range(-0.10, 0.10)))
 		"fir":
 			h = rng.randf_range(14.0, 22.0)
 			r = h * 0.030
 			var fbark := Color(0.205, 0.140, 0.098)
 			trunk.cyl(Transform3D.IDENTITY, r, r * 0.26, h, 7, fbark)
-			var fc := Color(0.045, 0.098, 0.080)
-			for i in range(13):
-				var t := float(i) / 12.0
-				var y: float = lerp(h * 0.18, h * 0.995, t)
-				var rr: float = lerp(h * 0.195, h * 0.022, pow(t, 0.80))
-				var jit := Vector3(rng.randf_range(-1.0, 1.0), 0.0,
-					rng.randf_range(-1.0, 1.0)) * rr * 0.12
-				leaf.cone(Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
-					Vector3(0, y, 0) + jit), rr, h * 0.145, 6,
-					_shade(fc, 1.0 + t * 0.65 + rng.randf_range(-0.10, 0.10)))
+			var fc := Color(0.062, 0.128, 0.104)
+			for i in range(11):
+				var t := float(i) / 10.0
+				var y: float = lerp(h * 0.16, h * 0.99, t)
+				var rr: float = lerp(h * 0.24, h * 0.035, pow(t, 0.78))
+				var per := 7 - int(t * 3.0)
+				for j in range(per):
+					var a := TAU * float(j) / float(per) + rng.randf_range(-0.4, 0.4) + t * 2.1
+					var d := rr * rng.randf_range(0.45, 1.0)
+					var p := Vector3(cos(a) * d, y + rng.randf_range(-0.3, 0.3), sin(a) * d)
+					var sz := rr * rng.randf_range(1.1, 1.6)
+					leaf.card(p, sz, sz * 0.7, -a + PI * 0.5, rng.randf_range(1.0, 1.4),
+						_shade(fc, 0.85 + t * 0.5 + rng.randf_range(-0.10, 0.10)))
 		"birch":
 			h = rng.randf_range(9.0, 14.0)
 			r = h * 0.026
@@ -78,11 +86,14 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				trunk.cyl(Transform3D(Basis.IDENTITY, Vector3(0, y, 0)),
 					r * 1.03, r * 1.0, h * 0.03, 7, Color(0.16, 0.16, 0.15))
 			var bc := Color(0.255, 0.330, 0.140)
-			for i in range(4):
+			for i in range(14):
 				var a := rng.randf() * TAU
-				var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.4, 1.6)
-				leaf.sphere(Vector3(0, h * 0.82, 0) + off, h * rng.randf_range(0.16, 0.24),
-					7, 6, _shade(bc, rng.randf_range(0.80, 1.30)), Vector3(1.0, 0.95, 1.0))
+				var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.2, 1.9)
+				off.y = h * rng.randf_range(-0.10, 0.12)
+				var sz := h * rng.randf_range(0.16, 0.26)
+				leaf.card(Vector3(0, h * 0.82, 0) + off, sz, sz * 0.85,
+					rng.randf() * TAU, rng.randf_range(-0.5, 0.5),
+					_shade(bc, rng.randf_range(0.80, 1.30)))
 		"oak":
 			h = rng.randf_range(9.0, 13.0)
 			r = h * 0.055
@@ -93,11 +104,21 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				var from := Vector3(0, h * 0.55, 0)
 				var to := from + Vector3(cos(a), 1.1, sin(a)) * h * 0.28
 				trunk.rod(from, to, r * 0.30, 5, Color(0.30, 0.22, 0.15))
-				leaf.sphere(to + Vector3(0, h * 0.06, 0), h * 0.24, 7, 6,
-					_shade(Color(0.100, 0.178, 0.092), rng.randf_range(0.85, 1.45)),
-					Vector3(1.05, 0.90, 1.05))
-			leaf.sphere(Vector3(0, h * 0.82, 0), h * 0.32, 9, 7, Color(0.095, 0.168, 0.086),
-				Vector3(1.08, 0.92, 1.08))
+				for j in range(7):
+					var off := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.5, 1.0),
+						rng.randf_range(-1.0, 1.0)) * h * 0.16
+					var sz := h * rng.randf_range(0.20, 0.32)
+					leaf.card(to + off, sz, sz * 0.85, rng.randf() * TAU,
+						rng.randf_range(-0.5, 0.5),
+						_shade(Color(0.100, 0.178, 0.092), rng.randf_range(0.80, 1.40)))
+			for j in range(10):
+				var a3 := rng.randf() * TAU
+				var d3 := rng.randf_range(0.0, h * 0.22)
+				var sz3 := h * rng.randf_range(0.22, 0.34)
+				leaf.card(Vector3(cos(a3) * d3, h * rng.randf_range(0.72, 0.92),
+					sin(a3) * d3), sz3, sz3 * 0.85, rng.randf() * TAU,
+					rng.randf_range(-0.4, 0.4),
+					_shade(Color(0.095, 0.168, 0.086), rng.randf_range(0.85, 1.30)))
 		"ancient":
 			h = rng.randf_range(12.0, 18.0)
 			r = h * 0.070
@@ -146,17 +167,23 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				var to := from + Vector3(cos(a) * reach, h * rng.randf_range(0.12, 0.24),
 					sin(a) * reach)
 				trunk.rod(from, to, r * 0.30, 5, bbark.darkened(0.12))
-				# 가지마다 작은 잎 덩어리 셋. 크기를 흩어야 덩어리 하나로 안 보인다.
-				for j in range(3):
-					var off := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.7, 0.9),
-						rng.randf_range(-1.0, 1.0)) * h * 0.11
-					leaf.sphere(to + off, h * rng.randf_range(0.11, 0.19), 6, 5,
-						_shade(cc, rng.randf_range(0.78, 1.45)), Vector3(1.0, 0.90, 1.0))
-			# 중앙 수관 — 위로 솟은 형태
-			leaf.sphere(Vector3(0, h * 0.86, 0), h * 0.20, 8, 6,
-				_shade(cc, 1.15), Vector3(1.0, 1.00, 1.0))
-			leaf.sphere(Vector3(0, h * 0.74, 0), h * 0.24, 8, 6,
-				_shade(cc, 0.92), Vector3(1.05, 0.95, 1.05))
+				# 가지 끝마다 잎 카드 뭉치. 솔리드 구체보다 훨씬 나무답다.
+				for j in range(7):
+					var off := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.6, 1.0),
+						rng.randf_range(-1.0, 1.0)) * h * 0.14
+					var sz := h * rng.randf_range(0.16, 0.27)
+					leaf.card(to + off, sz, sz * 0.85, rng.randf() * TAU,
+						rng.randf_range(-0.5, 0.5),
+						_shade(cc, rng.randf_range(0.75, 1.45)))
+			# 중앙 수관
+			for j in range(10):
+				var a2 := rng.randf() * TAU
+				var d2 := rng.randf_range(0.0, h * 0.16)
+				var p2 := Vector3(cos(a2) * d2, h * rng.randf_range(0.70, 0.92),
+					sin(a2) * d2)
+				var sz2 := h * rng.randf_range(0.18, 0.28)
+				leaf.card(p2, sz2, sz2 * 0.85, rng.randf() * TAU,
+					rng.randf_range(-0.5, 0.5), _shade(cc, rng.randf_range(0.80, 1.35)))
 
 	var log_mb := MeshBuilder.new()
 	log_mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO), r, r * 0.7,
@@ -385,7 +412,7 @@ func humanoid(cfg: Dictionary) -> Node3D:
 	var torso := MeshInstance3D.new()
 	torso.name = "torso"
 	torso.mesh = tb.commit()
-	torso.material_override = MatLib.flat(Color.WHITE)
+	torso.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "cloth")
 	hips.add_child(torso)
 
 	# 머리
@@ -416,7 +443,7 @@ func humanoid(cfg: Dictionary) -> Node3D:
 	var head := MeshInstance3D.new()
 	head.name = "head"
 	head.mesh = hb.commit()
-	head.material_override = MatLib.flat(Color.WHITE)
+	head.material_override = MatLib.flat(Color.WHITE, 0.90)
 	head_pivot.add_child(head)
 
 	# 팔 (어깨 피벗에서 아래로)
@@ -433,7 +460,7 @@ func humanoid(cfg: Dictionary) -> Node3D:
 		var arm := MeshInstance3D.new()
 		arm.name = "mesh"
 		arm.mesh = ab.commit()
-		arm.material_override = MatLib.flat(Color.WHITE)
+		arm.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "cloth")
 		pivot.add_child(arm)
 		var hand := Node3D.new()
 		hand.name = "hand_l" if side < 0 else "hand_r"
@@ -454,7 +481,7 @@ func humanoid(cfg: Dictionary) -> Node3D:
 		var leg := MeshInstance3D.new()
 		leg.name = "mesh"
 		leg.mesh = lb.commit()
-		leg.material_override = MatLib.flat(Color.WHITE)
+		leg.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "cloth")
 		pivot.add_child(leg)
 
 	if mat_leaf:
@@ -547,7 +574,7 @@ func quadruped(cfg: Dictionary) -> Node3D:
 	var head := MeshInstance3D.new()
 	head.name = "head"
 	head.mesh = hb.commit()
-	head.material_override = MatLib.flat(Color.WHITE)
+	head.material_override = MatLib.flat(Color.WHITE, 0.90)
 	neck.add_child(head)
 
 	# 다리 4개
@@ -568,7 +595,7 @@ func quadruped(cfg: Dictionary) -> Node3D:
 		var leg := MeshInstance3D.new()
 		leg.name = "mesh"
 		leg.mesh = lb.commit()
-		leg.material_override = MatLib.flat(Color.WHITE)
+		leg.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "cloth")
 		pivot.add_child(leg)
 
 	# 꼬리

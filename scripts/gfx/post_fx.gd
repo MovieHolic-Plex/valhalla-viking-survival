@@ -11,9 +11,9 @@ shader_type canvas_item;
 render_mode blend_mix, unshaded;
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
-uniform float vignette_amount = 0.42;
+uniform float vignette_amount = 0.26;
 uniform float vignette_softness = 0.55;
-uniform float edge_desat = 0.35;
+uniform float edge_desat = 0.20;
 uniform vec3 shadow_tint : source_color = vec3(0.86, 0.92, 1.05);
 uniform vec3 light_tint : source_color = vec3(1.04, 1.00, 0.94);
 uniform float underwater = 0.0;

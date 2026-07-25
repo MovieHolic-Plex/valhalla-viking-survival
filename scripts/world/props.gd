@@ -217,7 +217,7 @@ static func _visual_meshes(rtype: String, rsub: String, sv: int) -> Array:
 			var t := MeshFactory.tree(rsub, sv)
 			return [
 				[t["trunk"], MatLib.flat(Color.WHITE)],
-				[t["leaves"], MatLib.foliage(Color.WHITE, 0.0, 0.03)],
+				[t["leaves"], MatLib.leaf_card()],
 			]
 		"rock":
 			return [[MeshFactory.boulder(1.2, sv), MatLib.flat(Color.WHITE, 0.98)]]
@@ -258,7 +258,7 @@ static func _build_grass(parent: Node3D, gen: WorldGen, cx: int, cz: int, biome:
 		if b != biome:
 			continue
 		# 가파른 곳엔 풀이 붙지 않는다 (암반이 드러나야 한다)
-		if gen.slope_at(px, pz) > 0.42:
+		if gen.slope_at(px, pz) > 0.55:
 			continue
 		var s := rng.randf_range(0.70, 1.20)
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU)

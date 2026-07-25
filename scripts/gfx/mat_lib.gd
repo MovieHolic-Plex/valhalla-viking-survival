@@ -19,15 +19,19 @@ const TERRAIN_SHADER := """
 shader_type spatial;
 render_mode cull_back, diffuse_burley, specular_schlick_ggx;
 
-uniform sampler2D detail : filter_nearest, repeat_enable;   // 거친 픽셀 그레인
-uniform sampler2D macro_tex : filter_linear, repeat_enable; // 부드러운 대형 얼룩
-uniform float detail_scale = 0.30;
-uniform float detail_power = 0.34;
-// 암반: 따뜻한 흑갈색(0) ↔ 차갑고 밝은 화강암(1). COLOR.a 로 보간한다.
-uniform vec3 rock_warm : source_color = vec3(0.215, 0.180, 0.145);
+// 발헤임 룩의 핵심: 저해상도 픽셀 텍스처 4장을 경사/고도로 스플랫하고
+// 조명·안개가 나머지를 담당한다. 단색 버텍스 컬러만으로는 이 느낌이 안 난다.
+uniform sampler2D tex_grass : filter_nearest, repeat_enable;
+uniform sampler2D tex_dirt  : filter_nearest, repeat_enable;
+uniform sampler2D tex_rock  : filter_nearest, repeat_enable;
+uniform sampler2D tex_snow  : filter_nearest, repeat_enable;
+uniform sampler2D macro_tex : filter_linear, repeat_enable;
+
+uniform float tex_scale = 0.55;    // 1m 당 텍셀 밀도 (클수록 촘촘)
+uniform float wetness = 0.0;
+uniform vec3 rock_warm : source_color = vec3(0.285, 0.245, 0.200);
 uniform vec3 rock_cool : source_color = vec3(0.395, 0.410, 0.445);
-uniform vec3 dirt_col : source_color = vec3(0.205, 0.155, 0.105);
-uniform float wetness = 0.0;   // 비가 오면 지면이 젖어 어두워지고 광택이 돈다
+uniform vec3 dirt_col : source_color = vec3(0.285, 0.215, 0.145);
 
 varying vec3 v_world;
 varying vec3 v_norm;
@@ -39,52 +43,55 @@ void vertex() {
 	v_rock_t = COLOR.a;
 }
 
-// UV 없이 삼면 투영으로 샘플링.
-// 필터 힌트가 다른 샘플러를 한 함수에 넘길 수 없어 두 벌로 나눈다.
-float tri_d(vec3 p, vec3 bw) {
-	return texture(detail, p.yz).r * bw.x + texture(detail, p.xz).r * bw.y
-		+ texture(detail, p.xy).r * bw.z;
+// 삼면 투영 — 절벽에서도 텍스처가 늘어지지 않는다
+vec3 tri3(sampler2D t, vec3 p, vec3 bw) {
+	return texture(t, p.yz).rgb * bw.x + texture(t, p.xz).rgb * bw.y
+		+ texture(t, p.xy).rgb * bw.z;
 }
-// 대형 얼룩은 위에서 내려다본 XZ 평면 투영만 쓴다.
-// 절벽에 늘어져 보이지만 그 위엔 어차피 암반색이 덮이고, 샘플 수가 1/3 이다.
-float mac(vec2 p) {
-	return texture(macro_tex, p).r;
-}
+float mac(vec2 p) { return texture(macro_tex, p).r; }
 
 void fragment() {
 	vec3 bw = pow(abs(v_norm), vec3(4.0));
 	bw /= (bw.x + bw.y + bw.z);
+	vec3 p = v_world * tex_scale;
+	// 두 배율을 겹쳐 타일 반복이 눈에 띄지 않게 한다
+	vec3 p2 = v_world * (tex_scale * 0.23);
 
-	float d  = tri_d(v_world * detail_scale, bw);       // 근거리 그레인
-	float m1 = mac(v_world.xz * 0.013);           // 수십 m 단위 얼룩
-	float m2 = mac(v_world.xz * 0.075);           // 수 m 단위 얼룩
-
-	vec3 base = COLOR.rgb;
-	// 대·중·소 세 단계 밝기 변주를 겹쳐 단색 평면을 깬다
-	base *= mix(0.80, 1.16, m1);
-	base *= mix(0.88, 1.10, m2);
-	base *= mix(1.0, 0.58 + d * 0.88, detail_power);
-
-	// 경사도에 따라 흙 → 암반. 두 단계로 나눠야 절벽 아래 흙띠가 생긴다.
+	float m1 = mac(v_world.xz * 0.013);
+	float m2 = mac(v_world.xz * 0.075);
 	float slope = 1.0 - clamp(v_norm.y, 0.0, 1.0);
-	vec3 rock = mix(rock_warm, rock_cool, clamp(v_rock_t, 0.0, 1.0));
-	float dirt_amt = smoothstep(0.13, 0.33, slope) * (0.75 + m2 * 0.4);
-	base = mix(base, dirt_col * mix(0.78, 1.30, d), clamp(dirt_amt, 0.0, 1.0));
-	base = mix(base, rock * mix(0.70, 1.34, d), smoothstep(0.30, 0.58, slope));
+	float snowy = clamp(v_rock_t, 0.0, 1.0);
 
-	// 위를 향한 면일수록 하늘빛을 조금 더 받는다 (대기 산란 흉내)
-	base *= mix(vec3(0.94, 0.95, 0.98), vec3(1.02, 1.01, 0.99), clamp(v_norm.y, 0.0, 1.0));
+	vec3 g = tri3(tex_grass, p, bw) * (0.72 + tri3(tex_grass, p2, bw).g * 0.55);
+	vec3 d = tri3(tex_dirt, p, bw);
+	vec3 r = tri3(tex_rock, p * 0.6, bw);
+	vec3 sn = tri3(tex_snow, p * 0.7, bw);
 
-	// 젖은 땅: 어두워지고 거칠기가 낮아진다. 웅덩이는 평평한 곳에 고인다.
+	// 지면 = 바이옴 색(버텍스) x 잔디 텍스처
+	vec3 base = COLOR.rgb * g * 1.30;
+	base *= mix(0.84, 1.14, m1);        // 큰 스케일 얼룩
+
+	// 경사 → 흙 → 암반 2단 블렌드
+	float dirt_amt = smoothstep(0.30, 0.54, slope) * (0.75 + m2 * 0.4);
+	base = mix(base, dirt_col * d * 1.75, clamp(dirt_amt, 0.0, 1.0));
+	vec3 rock_c = mix(rock_warm, rock_cool, snowy);
+	base = mix(base, rock_c * r * 1.85, smoothstep(0.52, 0.78, slope));
+
+	// 설산: 완만한 면에만 눈이 쌓인다.
+	// snowy 는 암반 색 파라미터를 겸하므로 1.0 에 가까울 때(설산)만 눈으로 친다.
+	float snow_amt = smoothstep(0.86, 1.0, snowy) * smoothstep(0.55, 0.20, slope);
+	base = mix(base, sn * vec3(0.86, 0.90, 0.96), snow_amt);
+
+	// 젖은 땅
 	float puddle = wetness * (1.0 - smoothstep(0.02, 0.16, slope))
 		* smoothstep(0.35, 0.75, m2);
-	base *= mix(1.0, 0.62, wetness * 0.85);
+	base *= mix(1.0, 0.64, wetness * 0.85);
 	base = mix(base, base * 0.55, puddle);
 
 	ALBEDO = base;
-	ROUGHNESS = mix(mix(0.99, 0.80, slope), 0.14, max(wetness * 0.55, puddle));
+	ROUGHNESS = mix(mix(0.98, 0.82, slope), 0.14, max(wetness * 0.55, puddle));
 	SPECULAR = mix(0.08, 0.55, max(wetness * 0.7, puddle));
-	AO = mix(1.0, 0.72 + m2 * 0.28, 0.55);
+	AO = mix(1.0, 0.74 + m2 * 0.26, 0.5);
 	AO_LIGHT_AFFECT = 0.4;
 }
 """
@@ -136,12 +143,44 @@ void fragment() {
 }
 """
 
+const LEAFCARD_SHADER := """
+shader_type spatial;
+render_mode cull_disabled, diffuse_burley, depth_prepass_alpha;
+
+// 알파가 뚫린 잎 텍스처를 붙인 카드. 발헤임 나뭇잎의 실루엣이 여기서 나온다.
+uniform sampler2D leaf_tex : filter_nearest;
+uniform float sway = 0.05;
+uniform float wind = 0.5;
+uniform float alpha_cut = 0.45;
+
+varying vec3 v_world;
+
+void vertex() {
+	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float t = TIME * 1.1;
+	float gust = sin(t * 0.31 + wp.x * 0.035 + wp.z * 0.028) * 0.5 + 0.5;
+	float amp = sway * (0.45 + wind) * (0.55 + gust * 0.9);
+	VERTEX.x += sin(t + wp.x * 0.3 + wp.z * 0.2) * amp;
+	VERTEX.z += cos(t * 0.87 + wp.z * 0.31) * amp * 0.7;
+	v_world = wp;
+}
+
+void fragment() {
+	vec4 t = texture(leaf_tex, UV);
+	if (t.a < alpha_cut) discard;
+	ALBEDO = COLOR.rgb * t.rgb * 1.35;
+	ROUGHNESS = 0.95;
+	SPECULAR = 0.04;
+	BACKLIGHT = ALBEDO * 0.30;
+}
+"""
+
 const WATER_SHADER := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert, specular_schlick_ggx;
 
-uniform vec4 shallow : source_color = vec4(0.135, 0.290, 0.290, 1.0);
-uniform vec4 deep : source_color = vec4(0.012, 0.038, 0.062, 1.0);
+uniform vec4 shallow : source_color = vec4(0.150, 0.310, 0.305, 1.0);
+uniform vec4 deep : source_color = vec4(0.045, 0.105, 0.135, 1.0);
 uniform vec3 sun_dir = vec3(0.0, -1.0, 0.0);
 uniform vec3 sun_col : source_color = vec3(1.0, 0.94, 0.82);
 uniform vec3 sky_col : source_color = vec3(0.72, 0.82, 0.92);
@@ -215,6 +254,10 @@ void fragment() {
 	vec3 refl = mix(deep.rgb, sky_col * 0.72, 0.80);
 	col = mix(col, refl, clamp(fres, 0.0, 1.0) * 0.45);
 
+	// 깊은 물이 새까맣게 죽지 않도록 하늘빛 산란을 조금 더한다.
+	// 물리적으로는 다중산란에 해당하고, 없으면 위에서 내려다본 호수가 검게 보인다.
+	col += sky_col * 0.16 * d;
+
 	ALBEDO = col;
 	ROUGHNESS = mix(0.02, 0.14, foam);
 	METALLIC = 0.0;
@@ -247,6 +290,8 @@ func _ready() -> void:
 func set_wind(v: float) -> void:
 	for m in _foliage_cache.values():
 		m.set_shader_parameter("wind", v)
+	if _leaf_mat != null:
+		_leaf_mat.set_shader_parameter("wind", v)
 
 ## 비에 젖은 정도(0~1)를 지형에 반영한다
 func set_wetness(v: float) -> void:
@@ -283,10 +328,12 @@ func _make_terrain_mat() -> void:
 	sh.code = TERRAIN_SHADER
 	terrain_mat = ShaderMaterial.new()
 	terrain_mat.shader = sh
-	terrain_mat.set_shader_parameter("detail", noise_tex)
+	terrain_mat.set_shader_parameter("tex_grass", TexLib.get_tex("grass"))
+	terrain_mat.set_shader_parameter("tex_dirt", TexLib.get_tex("dirt"))
+	terrain_mat.set_shader_parameter("tex_rock", TexLib.get_tex("rock"))
+	terrain_mat.set_shader_parameter("tex_snow", TexLib.get_tex("snow"))
 	terrain_mat.set_shader_parameter("macro_tex", macro_tex)
-	terrain_mat.set_shader_parameter("detail_scale", 0.26)
-	terrain_mat.set_shader_parameter("detail_power", 0.34)
+	terrain_mat.set_shader_parameter("tex_scale", 0.55)
 
 func _make_water_mat() -> void:
 	var sh := Shader.new()
@@ -297,8 +344,9 @@ func _make_water_mat() -> void:
 
 # ─────────────────────────────────────────────── 머티리얼 팩토리
 ## 단색 로우폴리 머티리얼 (버텍스 컬러 곱)
-func flat(col: Color, rough: float = 0.92, metal: float = 0.0, emis: float = 0.0) -> StandardMaterial3D:
-	var key := "%s|%.2f|%.2f|%.2f" % [col.to_html(), rough, metal, emis]
+func flat(col: Color, rough: float = 0.92, metal: float = 0.0, emis: float = 0.0,
+		tex: String = "") -> StandardMaterial3D:
+	var key := "%s|%.2f|%.2f|%.2f|%s" % [col.to_html(), rough, metal, emis, tex]
 	if _flat_cache.has(key):
 		return _flat_cache[key]
 	var m := StandardMaterial3D.new()
@@ -307,9 +355,16 @@ func flat(col: Color, rough: float = 0.92, metal: float = 0.0, emis: float = 0.0
 	m.metallic = metal
 	m.vertex_color_use_as_albedo = true
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST_WITH_MIPMAPS
-	m.albedo_texture = grain_tex
-	m.uv1_triplanar = true
-	m.uv1_scale = Vector3(0.45, 0.45, 0.45)
+	# 재질을 지정하면 저해상도 픽셀 텍스처를 삼면 투영으로 입힌다.
+	# 지정이 없으면 기존처럼 은은한 그레인만 얹는다.
+	if tex != "":
+		m.albedo_texture = TexLib.get_tex(tex)
+		m.uv1_triplanar = true
+		m.uv1_scale = Vector3(1.1, 1.1, 1.1)
+	else:
+		m.albedo_texture = grain_tex
+		m.uv1_triplanar = true
+		m.uv1_scale = Vector3(0.45, 0.45, 0.45)
 	if emis > 0.0:
 		m.emission_enabled = true
 		m.emission = col
@@ -336,6 +391,19 @@ func foliage(col: Color, stiffness: float = 0.0, sway: float = 0.06,
 	m.set_shader_parameter("fade_end", fade_end)
 	_foliage_cache[key] = m
 	return m
+
+## 잎 카드 머티리얼 (알파 컷 + 바람). 캐시해 한 벌만 쓴다.
+var _leaf_mat: ShaderMaterial = null
+func leaf_card() -> ShaderMaterial:
+	if _leaf_mat != null:
+		return _leaf_mat
+	var sh := Shader.new()
+	sh.code = LEAFCARD_SHADER
+	_leaf_mat = ShaderMaterial.new()
+	_leaf_mat.shader = sh
+	_leaf_mat.set_shader_parameter("leaf_tex", TexLib.get_tex("leaf"))
+	_leaf_mat.set_shader_parameter("sway", 0.045)
+	return _leaf_mat
 
 func ghost(col: Color) -> ShaderMaterial:
 	var sh := Shader.new()

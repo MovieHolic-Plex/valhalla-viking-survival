@@ -359,3 +359,85 @@ static func _build() -> void:
 			"wing": 1.9},
 		"drops": {"charred_bone": [1, 2, 0.6], "feathers": [1, 3, 0.7]},
 	})
+
+	# ═══════════ 확장: 추가 생물 ═══════════
+	_e("chicken", {
+		"biomes": [B.MEADOWS], "tier": 0, "hp": 10.0, "dmg": {D.PIERCE: 3.0},
+		"speed": 2.6, "run": 5.0, "range": 1.2, "cd": 2.0, "size": 0.4,
+		"passive": true, "flee": true,
+		"rig": "quad", "rig_cfg": {"fur": Color(0.90, 0.86, 0.76), "length": 0.5,
+			"height": 0.42, "girth": 0.24, "head": 0.16, "tail": 0.3, "horn": "none"},
+		"drops": {"boar_meat": [1, 1, 0.8], "feathers": [1, 3, 0.9]},
+		"tame": {"food": ["barley", "carrot", "onion"], "needed": 2, "baby": "chicken"},
+	})
+	_e("bat", {
+		"biomes": [B.BLACKFOREST, B.MOUNTAIN], "tier": 1, "hp": 22.0,
+		"dmg": {D.SLASH: 14.0}, "speed": 4.4, "run": 7.0, "range": 1.6, "cd": 1.4,
+		"size": 0.5, "flying": true, "night_only": true,
+		"rig": "flyer", "rig_cfg": {"color": Color(0.30, 0.24, 0.28), "size": 0.5,
+			"wing": 0.9},
+		"drops": {"bat_wing": [1, 2, 0.7], "leather_scraps": [1, 1, 0.3]},
+		"trophy": ["trophy_bat", 0.06],
+	})
+	_e("serpent", {
+		"biomes": [B.OCEAN], "tier": 3, "hp": 500.0, "dmg": {D.SLASH: 70.0},
+		"speed": 3.4, "run": 5.4, "range": 3.6, "cd": 2.8, "size": 2.4,
+		"armor": 20.0, "kb": 90.0,
+		"rig": "quad", "rig_cfg": {"fur": Color(0.24, 0.46, 0.42), "length": 4.5,
+			"height": 1.2, "girth": 0.7, "head": 0.55, "neck": 1.6, "tail": 2.4,
+			"horn": "none"},
+		"drops": {"serpent_meat": [2, 4, 1.0], "serpent_scale": [3, 6, 0.9],
+			"serpent_trophy_scale": [0, 1, 0.2]},
+		"trophy": ["trophy_serpent", 0.15],
+	})
+	_e("hare", {
+		"biomes": [B.MISTLANDS], "tier": 5, "hp": 90.0, "dmg": {D.BLUNT: 12.0},
+		"speed": 4.2, "run": 8.0, "range": 1.4, "cd": 2.0, "size": 0.5,
+		"passive": true, "flee": true,
+		"rig": "quad", "rig_cfg": {"fur": Color(0.74, 0.72, 0.70), "length": 0.7,
+			"height": 0.55, "girth": 0.28, "head": 0.22, "tail": 0.2, "horn": "none"},
+		"drops": {"boar_meat": [1, 2, 0.9], "leather_scraps": [1, 2, 0.6]},
+		"trophy": ["trophy_hare", 0.10],
+	})
+	_e("dvergr", {
+		"biomes": [B.MISTLANDS], "tier": 5, "hp": 260.0, "dmg": {D.SLASH: 70.0},
+		"speed": 2.2, "run": 3.8, "range": 2.2, "cd": 2.2, "size": 1.0,
+		"armor": 12.0,
+		"rig": "humanoid", "rig_cfg": {"skin": Color(0.72, 0.62, 0.52),
+			"cloth": Color(0.30, 0.34, 0.42), "height": 1.55, "bulk": 1.2,
+			"beard": true, "eye": Color(0.6, 0.85, 1.0)},
+		"drops": {"eitr": [1, 2, 0.4], "yggdrasil_wood": [1, 3, 0.6],
+			"coins": [10, 40, 0.8]},
+		"trophy": ["trophy_dvergr", 0.08],
+	})
+	_e("asksvin", {
+		"biomes": [B.ASHLANDS], "tier": 6, "hp": 420.0, "dmg": {D.PIERCE: 110.0},
+		"speed": 3.2, "run": 6.2, "range": 2.6, "cd": 2.4, "size": 1.8,
+		"armor": 18.0, "kb": 80.0,
+		"rig": "quad", "rig_cfg": {"fur": Color(0.58, 0.46, 0.36), "length": 2.6,
+			"height": 1.7, "girth": 0.6, "head": 0.42, "neck": 0.9, "tail": 1.4,
+			"horn": "none"},
+		"drops": {"charred_bone": [2, 4, 0.8], "leather_scraps": [2, 4, 0.7]},
+		"trophy": ["trophy_asksvin", 0.10],
+	})
+	_e("charred_archer", {
+		"biomes": [B.ASHLANDS], "tier": 6, "hp": 260.0, "dmg": {D.PIERCE: 90.0},
+		"speed": 2.0, "run": 3.4, "range": 22.0, "cd": 2.6, "size": 1.0,
+		"ranged": true,
+		"rig": "humanoid", "rig_cfg": {"skin": Color(0.28, 0.20, 0.18),
+			"cloth": Color(0.20, 0.12, 0.10), "height": 1.85,
+			"eye": Color(1.0, 0.5, 0.15)},
+		"glow": Color(1.0, 0.35, 0.08),
+		"drops": {"charred_bone": [1, 3, 0.9], "coal": [1, 3, 0.6]},
+		"trophy": ["trophy_charred", 0.08],
+	})
+	_e("skeleton_archer", {
+		"biomes": [B.BLACKFOREST, B.SWAMP], "tier": 2, "hp": 70.0,
+		"dmg": {D.PIERCE: 40.0}, "speed": 1.9, "run": 3.0, "range": 20.0, "cd": 2.8,
+		"size": 1.0, "ranged": true,
+		"rig": "humanoid", "rig_cfg": {"skin": Color(0.86, 0.84, 0.76),
+			"cloth": Color(0.42, 0.38, 0.30), "height": 1.8,
+			"eye": Color(0.20, 0.75, 0.55)},
+		"drops": {"bone_fragments": [1, 3, 0.9], "wood_arrow": [3, 8, 0.6]},
+		"trophy": ["trophy_skeleton", 0.06],
+	})

@@ -18,15 +18,16 @@ var _mi: MeshInstance3D
 var _line: MeshInstance3D
 var _bob := 0.0
 
+## 바이옴마다 잡히는 어종이 다르다 — 낚시가 탐험의 이유가 되도록.
 const FISH_BY_BIOME := {
-	Const.Biome.OCEAN: ["fish", "fish", "serpent_meat"],
-	Const.Biome.MEADOWS: ["fish", "fish", "fish"],
-	Const.Biome.BLACKFOREST: ["fish", "fish"],
-	Const.Biome.SWAMP: ["fish", "leech_fish"],
-	Const.Biome.MOUNTAIN: ["fish"],
-	Const.Biome.PLAINS: ["fish", "fish"],
-	Const.Biome.MISTLANDS: ["fish"],
-	Const.Biome.ASHLANDS: ["fish"],
+	Const.Biome.OCEAN: ["tuna", "tuna", "perch", "serpent_meat"],
+	Const.Biome.MEADOWS: ["perch", "perch", "pike", "fish"],
+	Const.Biome.BLACKFOREST: ["perch", "pike", "trollfish"],
+	Const.Biome.SWAMP: ["leech_fish", "pike", "trollfish"],
+	Const.Biome.MOUNTAIN: ["northern_salmon", "northern_salmon", "perch"],
+	Const.Biome.PLAINS: ["pike", "tuna", "perch"],
+	Const.Biome.MISTLANDS: ["northern_salmon", "trollfish"],
+	Const.Biome.ASHLANDS: ["magmafish", "magmafish", "charred_bone"],
 }
 
 func _ready() -> void:

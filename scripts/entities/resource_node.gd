@@ -192,12 +192,12 @@ func _build_visual() -> void:
 			var trunk := MeshInstance3D.new()
 			trunk.name = "trunk"
 			trunk.mesh = t["trunk"]
-			trunk.material_override = MatLib.flat(Color.WHITE)
+			trunk.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "bark")
 			_visual.add_child(trunk)
 			var leaves := MeshInstance3D.new()
 			leaves.name = "leaves"
 			leaves.mesh = t["leaves"]
-			leaves.material_override = MatLib.foliage(Color.WHITE, 0.0, 0.045)
+			leaves.material_override = MatLib.leaf_card()
 			_visual.add_child(leaves)
 			var cap := CylinderShape3D.new()
 			cap.radius = maxf(_tree_r * 1.6, 0.32)
@@ -212,7 +212,7 @@ func _build_visual() -> void:
 				r, r * 0.85, l, 8, Color(0.38, 0.27, 0.17))
 			var mi := MeshInstance3D.new()
 			mi.mesh = mb.commit()
-			mi.material_override = MatLib.flat(Color.WHITE)
+			mi.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "bark")
 			_visual.add_child(mi)
 			var bs := BoxShape3D.new()
 			bs.size = Vector3(r * 2.0, r * 2.0, l)
@@ -221,7 +221,7 @@ func _build_visual() -> void:
 		Kind.STUMP:
 			var mi2 := MeshInstance3D.new()
 			mi2.mesh = MeshFactory.stump(get_meta("radius", 0.4))
-			mi2.material_override = MatLib.flat(Color.WHITE)
+			mi2.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "bark")
 			_visual.add_child(mi2)
 			var cs := CylinderShape3D.new()
 			cs.radius = get_meta("radius", 0.4) * 1.2
@@ -232,7 +232,7 @@ func _build_visual() -> void:
 			var size: float = get_meta("size", 1.0)
 			var mi3 := MeshInstance3D.new()
 			mi3.mesh = MeshFactory.boulder(size, seed_v)
-			mi3.material_override = MatLib.flat(Color.WHITE, 0.98)
+			mi3.material_override = MatLib.flat(Color.WHITE, 0.98, 0.0, 0.0, "rock")
 			_visual.add_child(mi3)
 			var sp := SphereShape3D.new()
 			sp.radius = size * 0.92
@@ -243,7 +243,7 @@ func _build_visual() -> void:
 			var od := MeshFactory.ore_node(sub, size2, seed_v)
 			var rock := MeshInstance3D.new()
 			rock.mesh = od["rock"]
-			rock.material_override = MatLib.flat(Color.WHITE, 0.98)
+			rock.material_override = MatLib.flat(Color.WHITE, 0.98, 0.0, 0.0, "rock")
 			_visual.add_child(rock)
 			var vein := MeshInstance3D.new()
 			vein.name = "vein"
@@ -303,7 +303,7 @@ func _build_pickable() -> void:
 			for i in range(3):
 				mb.rock(Vector3(randf_range(-0.15, 0.15), 0.07, randf_range(-0.15, 0.15)),
 					0.10, seed_v + i, Color(0.50, 0.50, 0.52), 5, 3, 0.3)
-			mi.material_override = MatLib.flat(Color.WHITE, 0.98)
+			mi.material_override = MatLib.flat(Color.WHITE, 0.98, 0.0, 0.0, "rock")
 		"flint":
 			for i in range(2):
 				mb.rock(Vector3(randf_range(-0.12, 0.12), 0.06, randf_range(-0.12, 0.12)),

@@ -26,10 +26,10 @@ var _rng := RandomNumberGenerator.new()
 const SUN_DAY := Color(1.0, 0.955, 0.865)
 const SUN_DUSK := Color(1.0, 0.52, 0.24)
 const MOON_COL := Color(0.48, 0.60, 0.90)
-const SUN_ENERGY := 1.10      # 직사광 : 앰비언트 ≈ 2:1. 그림자는 또렷하되
+const SUN_ENERGY := 0.85      # 직사광 : 앰비언트 ≈ 2:1. 그림자는 또렷하되
                               # 그늘진 비탈이 새까맣게 뭉개지지 않는 비율.
-const AMBIENT_DAY := 1.00
-const AMBIENT_NIGHT := 0.42   # 밤에도 실루엣은 보여야 한다 (달빛 + 산란광)
+const AMBIENT_DAY := 1.05
+const AMBIENT_NIGHT := 0.40   # 밤에도 실루엣은 보여야 한다 (달빛 + 산란광)
 
 var _ambient_target := AMBIENT_DAY
 
@@ -66,8 +66,8 @@ func _make_env() -> void:
 	# 발헤임의 입체감은 "약한 하늘빛 + 강한 방향광"에서 나온다.
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
 	# 하늘빛 100% 로 두면 그늘이 새파랗게 물든다. 중성색을 절반 섞는다.
-	e.ambient_light_sky_contribution = 0.40
-	e.ambient_light_color = Color(0.60, 0.61, 0.58)
+	e.ambient_light_sky_contribution = 0.30
+	e.ambient_light_color = Color(0.66, 0.67, 0.63)
 	e.ambient_light_energy = AMBIENT_DAY
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 
@@ -85,14 +85,17 @@ func _make_env() -> void:
 	e.fog_aerial_perspective = 0.20
 
 	# 볼류메트릭 포그 — 빛줄기
-	e.volumetric_fog_enabled = false
-	e.volumetric_fog_density = 0.005
-	e.volumetric_fog_albedo = Color(0.85, 0.88, 0.92)
+	# 볼류메트릭 포그 = 나무 사이로 쏟아지는 빛줄기(선샤프트).
+	# 발헤임 숲 화면의 인상 절반이 이것이다. 앰비언트 주입을 낮게 잡아야
+	# 원경이 우유처럼 하얗게 뜨지 않는다.
+	e.volumetric_fog_enabled = true
+	e.volumetric_fog_density = 0.006
+	e.volumetric_fog_albedo = Color(0.80, 0.84, 0.90)
 	e.volumetric_fog_emission_energy = 0.0
-	e.volumetric_fog_length = 96.0
+	e.volumetric_fog_length = 70.0
 	e.volumetric_fog_detail_spread = 2.0
-	e.volumetric_fog_gi_inject = 0.4
-	e.volumetric_fog_ambient_inject = 0.6
+	e.volumetric_fog_gi_inject = 0.0
+	e.volumetric_fog_ambient_inject = 0.10
 
 	# 톤매핑 + 블룸. ACES 는 밝은 부분이 흰색으로 날아가지 않고 색을 유지해서
 	# 발헤임 특유의 "부드러운 하이라이트 + 짙은 그림자"에 가깝다.
@@ -114,9 +117,11 @@ func _make_env() -> void:
 
 	# 접지 그림자 — 풀·바위·건물이 땅에 붙어 보이게 하는 결정적 요소
 	e.ssao_enabled = true
-	e.ssao_radius = 1.8
-	e.ssao_intensity = 1.8
-	e.ssao_power = 2.0
+	# 강하게 걸면 넓은 오목면(비탈 전체)이 통째로 까맣게 눌린다.
+	# 접지 그림자만 살짝 넣는 정도가 맞다.
+	e.ssao_radius = 0.8
+	e.ssao_intensity = 0.30
+	e.ssao_power = 1.0
 	e.ssao_detail = 0.6
 	e.ssao_horizon = 0.10
 	e.ssil_enabled = false
@@ -311,7 +316,7 @@ func _update_sun() -> void:
 	e.adjustment_saturation = lerpf(0.78, 0.99, day_amt)
 	e.adjustment_contrast = lerpf(1.02, 1.05, day_amt)
 	e.glow_intensity = lerpf(0.66, 0.42, day_amt)
-	e.volumetric_fog_density = lerpf(0.010, 0.005, day_amt) \
+	e.volumetric_fog_density = lerpf(0.011, 0.006, day_amt) \
 		* (2.4 if weather == "mist" else 1.0)
 
 func _update_weather(delta: float) -> void:
@@ -408,7 +413,11 @@ func _update_fog(delta: float) -> void:
 		# 높이 안개는 지하에서 무한히 짙어지므로 반드시 꺼야 한다
 		e.fog_height = -2000.0
 		e.fog_height_density = 0.0
-		e.ambient_light_energy = 0.22
+		e.ambient_light_energy = 0.13
+		# 지상 기준 노출을 그대로 쓰면 횃불 주변이 하얗게 탄다
+		e.tonemap_exposure = 0.62
+		e.glow_intensity = 0.28
+		e.adjustment_saturation = 0.88
 		sun.light_energy = 0.0
 		moon.light_energy = 0.0
 		return

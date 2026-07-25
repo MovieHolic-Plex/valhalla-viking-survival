@@ -47,7 +47,13 @@ func _ready() -> void:
 	var col: Color = _material_color()
 	_mi = MeshInstance3D.new()
 	_mi.mesh = MeshFactory.piece(str(data.get("kind", "wall")), size, col)
-	_mi.material_override = MatLib.flat(Color.WHITE, 0.92)
+	# 재질에 맞는 저해상도 텍스처를 입힌다 (석조 / 초가 / 판자)
+	var tex := "plank"
+	if data.get("stone", false):
+		tex = "masonry"
+	elif str(data.get("kind", "")).find("roof") >= 0:
+		tex = "thatch"
+	_mi.material_override = MatLib.flat(Color.WHITE, 0.92, 0.0, 0.0, tex)
 	add_child(_mi)
 
 	var cs := CollisionShape3D.new()

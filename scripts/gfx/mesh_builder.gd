@@ -32,6 +32,21 @@ func quad(a: Vector3, b: Vector3, c: Vector3, d: Vector3, col: Color) -> void:
 	_v(a, col, Vector2(0, 0)); _v(b, col, Vector2(1, 0)); _v(c, col, Vector2(1, 1))
 	_v(a, col, Vector2(0, 0)); _v(c, col, Vector2(1, 1)); _v(d, col, Vector2(0, 1))
 
+## 잎 카드 — 알파가 뚫린 텍스처를 붙일 양면 사각형.
+## 발헤임의 나뭇잎은 솔리드 도형이 아니라 이런 카드 뭉치다.
+func card(pos: Vector3, w: float, h: float, yaw: float, pitch: float,
+		col: Color) -> MeshBuilder:
+	var b := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, pitch)
+	var rx := b.x * (w * 0.5)
+	var ry := b.y * (h * 0.5)
+	var a := pos - rx - ry
+	var bb := pos + rx - ry
+	var c := pos + rx + ry
+	var d := pos - rx + ry
+	quad(a, bb, c, d, col)
+	quad(bb, a, d, c, col)      # 뒷면
+	return self
+
 # ─────────────────────────────────────────────── 프리미티브
 ## 중심 기준 박스
 func box(xf: Transform3D, size: Vector3, col: Color) -> MeshBuilder:

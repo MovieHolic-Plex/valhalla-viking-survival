@@ -169,6 +169,90 @@ func _build_craft() -> void:
 	_c("barley_flour", {"barley": 1}, ST_CAULDRON, 3, 1)
 	_c("linen_thread", {"flax": 1}, ST_CAULDRON, 3, 1)
 
+
+	# ══════════ 확장 콘텐츠 레시피 ══════════
+	# 무기 — 각 티어의 빈 자리를 메운다
+	_c("wood_club", {"wood": 4}, ST_NONE)
+	_c("bone_knife", {"bone_fragments": 8, "wood": 2}, ST_WORKBENCH, 1)
+	_c("bronze_knife", {"bronze": 2, "wood": 2, "leather_scraps": 2}, ST_FORGE, 1)
+	_c("iron_knife", {"iron": 4, "fine_wood": 2, "leather_scraps": 3}, ST_FORGE, 2)
+	_c("silver_knife", {"silver": 6, "fine_wood": 2, "wolf_fang": 2}, ST_FORGE, 3)
+	_c("blackmetal_knife", {"black_metal": 8, "fine_wood": 2, "linen_thread": 5}, ST_FORGE, 4)
+	_c("bronze_spear", {"bronze": 4, "wood": 4, "leather_scraps": 2}, ST_FORGE, 1)
+	_c("ancient_bark_spear", {"ancient_bark": 10, "iron": 4, "root": 4}, ST_FORGE, 2)
+	_c("blackmetal_spear", {"black_metal": 10, "fine_wood": 4, "linen_thread": 5}, ST_FORGE, 4)
+	_c("stagbreaker", {"wood": 20, "hard_antler": 8, "leather_scraps": 6}, ST_WORKBENCH, 2)
+	_c("porcupine", {"iron": 10, "needle": 10, "fine_wood": 4}, ST_FORGE, 3)
+	_c("battleaxe_crystal", {"crystal": 12, "silver": 10, "fine_wood": 6}, ST_FORGE, 4)
+	_c("crystal_battleaxe", {"crystal": 20, "black_metal": 8, "fine_wood": 8}, ST_FORGE, 5)
+	_c("dagger_dyrnwyn", {"flametal": 10, "surtling_core": 8, "yggdrasil_wood": 6}, ST_FORGE, 5)
+
+	# 화살
+	_c("bone_arrow", {"wood": 8, "bone_fragments": 2, "feathers": 2}, ST_WORKBENCH, 1, 20)
+	_c("silver_arrow", {"wood": 8, "silver": 1, "feathers": 2}, ST_FORGE, 3, 20)
+	_c("carapace_arrow", {"wood": 8, "carapace": 1, "feathers": 2}, ST_FORGE, 4, 20)
+	_c("flametal_arrow", {"wood": 8, "flametal": 1, "feathers": 2}, ST_FORGE, 5, 20)
+
+	# 방패
+	_c("bronze_buckler", {"bronze": 8, "fine_wood": 6}, ST_FORGE, 1)
+	_c("bone_tower_shield", {"withered_bone": 12, "iron": 6, "fine_wood": 8}, ST_FORGE, 2)
+	_c("serpent_scale_shield", {"serpent_scale": 16, "iron": 6, "fine_wood": 10}, ST_FORGE, 3)
+	_c("flametal_shield", {"flametal": 12, "yggdrasil_wood": 10}, ST_FORGE, 5)
+
+	# 방어구
+	_c("root_mask", {"root": 10, "ancient_bark": 8, "leather_scraps": 4}, ST_WORKBENCH, 3)
+	_c("root_harnesk", {"root": 16, "ancient_bark": 10, "deer_hide": 4}, ST_WORKBENCH, 3)
+	_c("root_leggings", {"root": 16, "ancient_bark": 10, "deer_hide": 4}, ST_WORKBENCH, 3)
+	_c("linen_hood", {"linen_thread": 15, "iron": 5}, ST_FORGE, 3)
+	_c("fenris_hood", {"wolf_pelt": 6, "wolf_fang": 4, "linen_thread": 6}, ST_WORKBENCH, 4)
+	_c("fenris_coat", {"wolf_pelt": 12, "wolf_fang": 6, "linen_thread": 10}, ST_WORKBENCH, 4)
+	_c("fenris_leggings", {"wolf_pelt": 12, "wolf_fang": 6, "linen_thread": 10}, ST_WORKBENCH, 4)
+	_c("eitr_weave_hood", {"eitr": 10, "linen_thread": 12}, ST_ARTISAN, 1)
+	_c("eitr_weave_robe", {"eitr": 16, "linen_thread": 20}, ST_ARTISAN, 1)
+	_c("eitr_weave_trousers", {"eitr": 16, "linen_thread": 20}, ST_ARTISAN, 1)
+	_c("flametal_helmet", {"flametal": 12, "ceramic_plate": 6}, ST_FORGE, 5)
+	_c("flametal_cuirass", {"flametal": 20, "ceramic_plate": 10}, ST_FORGE, 5)
+	_c("flametal_greaves", {"flametal": 20, "ceramic_plate": 10}, ST_FORGE, 5)
+	_c("linen_cape", {"linen_thread": 20, "silver": 4}, ST_WORKBENCH, 4)
+	_c("ash_cape", {"flametal": 6, "charred_bone": 16, "linen_thread": 10}, ST_ARTISAN, 1)
+
+	# 가공 자재
+	_c("leather_belt", {"leather_scraps": 6, "bronze": 1}, ST_WORKBENCH, 1)
+	_c("ceramic_plate", {"stone": 4, "coal": 2, "tar": 1}, ST_ARTISAN, 1)
+	_c("iron_nails", {"iron": 1}, ST_FORGE, 1, 20)
+	_c("bronze_nails", {"bronze": 1}, ST_FORGE, 1, 20)
+
+	# 요리 (가마솥)
+	_c("grilled_neck_tail", {"cooked_neck_tail": 1, "dandelion": 1}, ST_CAULDRON, 1)
+	_c("boar_jerky", {"cooked_boar_meat": 1, "honey": 1}, ST_CAULDRON, 1)
+	_c("honey_glazed_chicken", {"cooked_boar_meat": 1, "honey": 2, "carrot": 1}, ST_CAULDRON, 2)
+	_c("deer_stew", {"cooked_deer_meat": 1, "blueberries": 4, "carrot": 1}, ST_CAULDRON, 2)
+	_c("mushroom_stew", {"mushroom": 4, "onion": 1, "honey": 1}, ST_CAULDRON, 2)
+	_c("berry_pie", {"barley_flour": 4, "raspberries": 6, "blueberries": 6}, ST_CAULDRON, 3)
+	_c("minced_meat_sauce", {"cooked_boar_meat": 1, "carrot": 1, "turnip": 1}, ST_CAULDRON, 2)
+	_c("bread_and_honey", {"bread": 1, "honey": 2}, ST_CAULDRON, 2)
+	_c("wolf_skewer", {"cooked_wolf_meat": 1, "mushroom": 3, "onion": 1}, ST_CAULDRON, 3)
+	_c("serpent_stew", {"cooked_serpent_meat": 1, "mushroom": 4, "honey": 2}, ST_CAULDRON, 3)
+	_c("fish_and_bread", {"cooked_fish": 2, "bread": 1}, ST_CAULDRON, 3)
+	_c("blood_sausage", {"bloodbag": 4, "barley_flour": 4, "thistle": 2}, ST_CAULDRON, 4)
+	_c("misthare_supreme", {"boar_meat": 2, "mushroom": 4, "sap": 2}, ST_CAULDRON, 5)
+	_c("yggdrasil_porridge", {"sap": 2, "barley": 4, "royal_jelly": 0}, ST_CAULDRON, 5)
+	_c("seeker_aspic", {"soft_tissue": 2, "thistle": 2, "sap": 1}, ST_CAULDRON, 5)
+
+	# 벌꿀술 (가마솥 → 발효)
+	_c("mead_tasty", {"honey": 10, "raspberries": 10}, ST_CAULDRON, 1)
+	_c("mead_medium_health", {"honey": 10, "bloodbag": 4, "raspberries": 10, "dandelion": 1},
+		ST_CAULDRON, 3)
+	_c("mead_minor_eitr", {"honey": 10, "eitr": 4, "sap": 2}, ST_CAULDRON, 5)
+	_c("mead_lingering_stamina", {"honey": 10, "cloudberry": 10, "mushroom": 10},
+		ST_CAULDRON, 4)
+	_c("mead_bzerker", {"honey": 10, "wolf_fang": 2, "thistle": 4}, ST_CAULDRON, 4)
+
+	# 씨앗 — 채집물에서 뽑는다
+	_c("raspberry_seeds", {"raspberries": 3}, ST_WORKBENCH, 1, 2)
+	_c("birch_seeds", {"fine_wood": 3}, ST_WORKBENCH, 1, 2)
+	_c("fir_cone", {"core_wood": 3}, ST_WORKBENCH, 1, 2)
+
 func _build_cook() -> void:
 	# 요리 화로: 생고기 -> 익은 고기 (시간 초). 방치하면 탄다.
 	cook = {
@@ -180,6 +264,13 @@ func _build_cook() -> void:
 		"serpent_meat": {"out": "cooked_serpent_meat", "time": 45.0},
 		"fish": {"out": "cooked_fish", "time": 30.0},
 		"mushroom": {"out": "mushroom", "time": 20.0},
+		"perch": {"out": "cooked_perch", "time": 28.0},
+		"pike": {"out": "cooked_pike", "time": 32.0},
+		"tuna": {"out": "cooked_tuna", "time": 36.0},
+		"trollfish": {"out": "cooked_fish", "time": 34.0},
+		"magmafish": {"out": "cooked_magmafish", "time": 45.0},
+		"northern_salmon": {"out": "cooked_fish", "time": 34.0},
+		"leech_fish": {"out": "cooked_fish", "time": 30.0},
 	}
 
 func _build_smelt() -> void:
@@ -190,6 +281,8 @@ func _build_smelt() -> void:
 		"silver_ore": {"out": "silver", "time": 30.0},
 		"black_metal_scrap": {"out": "black_metal", "time": 30.0},
 		"flametal_ore": {"out": "flametal", "time": 40.0},
+		"proustite": {"out": "silver", "time": 35.0},
+		"iron_ingot_scrap": {"out": "iron", "time": 25.0},
 	}
 	kiln = {
 		"wood": {"out": "coal", "time": 25.0},
