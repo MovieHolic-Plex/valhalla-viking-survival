@@ -1,0 +1,225 @@
+class_name WorldGen
+extends RefCounted
+## 시드 기반 절차적 세계 생성기.
+## 같은 시드는 언제나 같은 지형·바이옴·자원 배치를 만든다(결정적).
+
+var seed_value: int = 0
+
+var _cont: FastNoiseLite      # 대륙 형태
+var _hill: FastNoiseLite      # 언덕
+var _det: FastNoiseLite       # 잔디테일
+var _mtn: FastNoiseLite       # 산맥
+var _biome: FastNoiseLite     # 바이옴 경계 흔들기
+var _swamp: FastNoiseLite     # 늪 패치
+var _forest: FastNoiseLite    # 숲 밀도
+
+func _init(sv: int = 0) -> void:
+	seed_value = sv
+	_cont = _mk(sv + 1, 0.00085, 5, FastNoiseLite.TYPE_SIMPLEX)
+	_hill = _mk(sv + 2, 0.0075, 3, FastNoiseLite.TYPE_SIMPLEX)
+	_det = _mk(sv + 3, 0.045, 2, FastNoiseLite.TYPE_SIMPLEX)
+	_mtn = _mk(sv + 4, 0.0016, 3, FastNoiseLite.TYPE_SIMPLEX)
+	_biome = _mk(sv + 5, 0.0021, 2, FastNoiseLite.TYPE_SIMPLEX)
+	_swamp = _mk(sv + 6, 0.0019, 2, FastNoiseLite.TYPE_SIMPLEX)
+	_forest = _mk(sv + 7, 0.012, 2, FastNoiseLite.TYPE_SIMPLEX)
+
+static func _mk(sv: int, freq: float, oct: int, type: int) -> FastNoiseLite:
+	var n := FastNoiseLite.new()
+	n.seed = sv
+	n.frequency = freq
+	n.noise_type = type
+	n.fractal_octaves = oct
+	return n
+
+# ─────────────────────────────────────────────────────── 높이
+func height(x: float, z: float) -> float:
+	var d := sqrt(x * x + z * z)
+	var rn := d / Const.WORLD_RADIUS
+
+	# 섬 마스크: 바깥으로 갈수록 바다로 잠긴다
+	var mask := 1.0 - smoothstep(0.74, 1.02, rn)
+
+	var c := _cont.get_noise_2d(x, z)                       # -1..1
+	var land := (c * 0.5 + 0.5) * 0.80 + 0.30               # 0.30..1.10
+	land *= mask
+
+	var h := Const.WATER_LEVEL + (land - 0.545) * 98.0
+	h += _hill.get_noise_2d(x, z) * 6.0 * mask
+	h += _det.get_noise_2d(x, z) * 1.6
+
+	# 산맥: 능선 노이즈를 더해 뾰족하게
+	var mn := _mtn.get_noise_2d(x, z)
+	var m := smoothstep(0.28, 0.72, mn)
+	if m > 0.0:
+		var ridge := 1.0 - absf(_hill.get_noise_2d(x * 0.6 + 700.0, z * 0.6 - 400.0))
+		h += m * mask * (55.0 + 105.0 * ridge)
+
+	# 늪은 해수면 바로 위로 평탄화
+	var sw := _swamp_factor(x, z, rn)
+	if sw > 0.0:
+		var target := Const.WATER_LEVEL + 0.6
+		h = lerp(h, target + _det.get_noise_2d(x, z) * 1.1, sw * 0.85)
+
+	# 평원은 완만하게
+	if rn > 0.44 and rn < 0.64 and h > Const.WATER_LEVEL:
+		var pf := smoothstep(0.44, 0.50, rn) * (1.0 - smoothstep(0.60, 0.64, rn))
+		h = lerp(h, Const.WATER_LEVEL + 6.0 + _hill.get_noise_2d(x, z) * 4.0, pf * 0.55)
+
+	# 바다는 더 깊게 파서 수영/항해가 성립하도록
+	if h < Const.WATER_LEVEL:
+		h = Const.WATER_LEVEL - (Const.WATER_LEVEL - h) * 1.35 - 1.5
+
+	# 월드 가장자리는 확실히 바다
+	if rn > 1.0:
+		h = minf(h, Const.WATER_LEVEL - 30.0 - (rn - 1.0) * 200.0)
+	return h
+
+func _swamp_factor(x: float, z: float, rn: float) -> float:
+	if rn < 0.24 or rn > 0.60:
+		return 0.0
+	var s := _swamp.get_noise_2d(x + 3000.0, z - 2000.0)
+	var band := smoothstep(0.24, 0.30, rn) * (1.0 - smoothstep(0.52, 0.60, rn))
+	return smoothstep(0.28, 0.55, s) * band
+
+# ─────────────────────────────────────────────────────── 바이옴
+func biome_at(x: float, z: float) -> int:
+	var h := height(x, z)
+	return biome_from(x, z, h)
+
+func biome_from(x: float, z: float, h: float) -> int:
+	if h < Const.WATER_LEVEL - 0.5:
+		return Const.Biome.OCEAN
+
+	var d := sqrt(x * x + z * z)
+	var rn := d / Const.WORLD_RADIUS
+	var jitter := _biome.get_noise_2d(x, z) * 0.075
+	var r := rn + jitter
+
+	# 산악은 고도 우선 (단, 시작 지역 근처는 제외해 초반 난이도를 지킨다)
+	if h > Const.WATER_LEVEL + 62.0 and rn > 0.16:
+		return Const.Biome.MOUNTAIN
+
+	if _swamp_factor(x, z, rn) > 0.45 and h < Const.WATER_LEVEL + 6.0:
+		return Const.Biome.SWAMP
+
+	if r < 0.145:
+		return Const.Biome.MEADOWS
+	elif r < 0.315:
+		return Const.Biome.BLACKFOREST
+	elif r < 0.455:
+		# 늪 지대 사이의 마른 땅은 검은 숲이 이어진다
+		return Const.Biome.SWAMP if _swamp_factor(x, z, rn) > 0.18 else Const.Biome.BLACKFOREST
+	elif r < 0.645:
+		return Const.Biome.PLAINS
+	elif r < 0.835:
+		return Const.Biome.MISTLANDS
+	else:
+		return Const.Biome.ASHLANDS
+
+## 지면 색 — 바이옴 색 + 미세 변주 + 고도/경사 반영
+func ground_color(x: float, z: float, h: float, biome: int) -> Color:
+	var base: Color = Const.BIOME_GROUND[biome]
+	var v := _det.get_noise_2d(x * 0.5, z * 0.5) * 0.075
+	var c := Color(base.r + v, base.g + v, base.b + v * 0.8)
+
+	# 해안선 모래
+	if biome != Const.Biome.MOUNTAIN and h < Const.WATER_LEVEL + 1.6:
+		var t := clampf((Const.WATER_LEVEL + 1.6 - h) / 2.4, 0.0, 1.0)
+		c = c.lerp(Color(0.68, 0.62, 0.45), t * 0.9)
+	# 눈은 설산 바이옴에서만 — 그 외 고지대는 바위색으로 살짝 바랜다
+	if biome == Const.Biome.MOUNTAIN:
+		var t2 := clampf((h - (Const.WATER_LEVEL + 46.0)) / 22.0, 0.0, 1.0)
+		c = Color(0.52, 0.55, 0.58).lerp(Color(0.93, 0.95, 0.99), t2)
+	elif h > Const.WATER_LEVEL + 110.0:
+		# 아주 높은 곳만 바위색이 비친다
+		var t3 := clampf((h - (Const.WATER_LEVEL + 110.0)) / 50.0, 0.0, 1.0)
+		c = c.lerp(Color(0.50, 0.48, 0.44), t3 * 0.45)
+	# 애쉬랜드의 용암빛 균열
+	if biome == Const.Biome.ASHLANDS:
+		var g := _forest.get_noise_2d(x, z)
+		if g > 0.55:
+			c = c.lerp(Color(1.0, 0.35, 0.08), (g - 0.55) * 2.0)
+	return c
+
+# ─────────────────────────────────────────────────────── 배치 헬퍼
+## 청크 안의 결정적 난수기
+func chunk_rng(cx: int, cz: int, salt: int = 0) -> RandomNumberGenerator:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(Vector3i(cx, cz, salt + seed_value))
+	return rng
+
+## 숲 밀도 0~1
+func forest_density(x: float, z: float) -> float:
+	return clampf(_forest.get_noise_2d(x, z) * 0.5 + 0.5, 0.0, 1.0)
+
+## 지형 법선(경사 판정)
+func normal_at(x: float, z: float, e: float = 1.0) -> Vector3:
+	var hl := height(x - e, z)
+	var hr := height(x + e, z)
+	var hd := height(x, z - e)
+	var hu := height(x, z + e)
+	return Vector3(hl - hr, 2.0 * e, hd - hu).normalized()
+
+func slope_at(x: float, z: float) -> float:
+	return 1.0 - normal_at(x, z).y
+
+## 스폰 지점: 중앙 근처의 평탄한 초원 해안
+func find_spawn() -> Vector3:
+	var best := Vector3(0, Const.WATER_LEVEL + 5.0, 0)
+	var best_score := -1e9
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value + 12345
+	for i in range(600):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(30.0, 260.0)
+		var x := cos(a) * d
+		var z := sin(a) * d
+		var h := height(x, z)
+		if h < Const.WATER_LEVEL + 2.0 or h > Const.WATER_LEVEL + 22.0:
+			continue
+		if biome_from(x, z, h) != Const.Biome.MEADOWS:
+			continue
+		var sl := slope_at(x, z)
+		var score := -sl * 40.0 - absf(h - (Const.WATER_LEVEL + 8.0)) * 0.4 - d * 0.004
+		if score > best_score:
+			best_score = score
+			best = Vector3(x, h, z)
+	return best
+
+## 보스 제단 위치 — 각 바이옴 링에서 결정적으로 하나씩 고른다
+func altar_position(biome: int) -> Vector3:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 31 + biome * 7919
+	var ring_map := {
+		Const.Biome.MEADOWS: 0.10,
+		Const.Biome.BLACKFOREST: 0.24,
+		Const.Biome.SWAMP: 0.39,
+		Const.Biome.MOUNTAIN: 0.42,
+		Const.Biome.PLAINS: 0.55,
+		Const.Biome.MISTLANDS: 0.72,
+		Const.Biome.ASHLANDS: 0.90,
+	}
+	var want_r: float = float(ring_map.get(biome, 0.3))
+	var best := Vector3.ZERO
+	var best_score := -1e9
+	for i in range(900):
+		var a := rng.randf() * TAU
+		var d: float = Const.WORLD_RADIUS * clampf(want_r + rng.randf_range(-0.06, 0.06), 0.05, 0.97)
+		var x := cos(a) * d
+		var z := sin(a) * d
+		var h := height(x, z)
+		if h < Const.WATER_LEVEL + 2.0:
+			continue
+		if biome_from(x, z, h) != biome:
+			continue
+		var score := -slope_at(x, z) * 60.0
+		if score > best_score:
+			best_score = score
+			best = Vector3(x, h, z)
+	if best == Vector3.ZERO:
+		# 해당 바이옴을 못 찾으면 링 위 아무 육지
+		var a2 := rng.randf() * TAU
+		var d2: float = Const.WORLD_RADIUS * want_r
+		best = Vector3(cos(a2) * d2, 0, sin(a2) * d2)
+		best.y = height(best.x, best.z)
+	return best
