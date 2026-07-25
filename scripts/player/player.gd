@@ -83,14 +83,15 @@ func _ready() -> void:
 	stats = PlayerStats.new()
 	stats.died.connect(_on_died)
 
-	rig = MeshFactory.humanoid({
+	# 스켈레탈 리그 — 팔꿈치/무릎이 실제로 접힌다
+	rig = MeshFactory.humanoid_skeletal({
 		"skin": Color(0.80, 0.64, 0.52), "cloth": Color(0.45, 0.36, 0.26),
 		"hair": Color(0.48, 0.32, 0.16), "height": 1.8, "beard": true,
 	})
 	add_child(rig)
 	anim = RigAnimator.new(rig)
-	hand_r = rig.get_node_or_null("hips/arm_r/hand_r")
-	hand_l = rig.get_node_or_null("hips/arm_l/hand_l")
+	hand_r = rig.get_node_or_null("skel/hand_r")
+	hand_l = rig.get_node_or_null("skel/hand_l")
 
 	# 카메라 리그
 	yaw_pivot = Node3D.new()

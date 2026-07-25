@@ -1045,3 +1045,164 @@ func ground_root(seed_v: int) -> Mesh:
 		mb.rod(p0, p1, rng.randf_range(0.05, 0.11), 5, col)
 	_cache[k] = mb.commit()
 	return _cache[k]
+
+# ═══════════════════════════════════════════════════════ 스켈레탈 인간형
+## 본 이름 → 인덱스. RigAnimator 가 이 이름으로 본을 찾는다.
+const BONES := ["hips", "spine", "chest", "neck", "head",
+	"shoulder_l", "upperarm_l", "forearm_l", "hand_l",
+	"shoulder_r", "upperarm_r", "forearm_r", "hand_r",
+	"thigh_l", "shin_l", "foot_l", "thigh_r", "shin_r", "foot_r"]
+
+## Skeleton3D + 스킨드 메시로 만든 인간형.
+##
+## 기존 humanoid() 는 몸통 조각을 Node3D 로 나눠 통째로 회전시켰다. 그래서 팔다리가
+## 막대처럼 뻣뻣했다. 여기서는 팔·다리를 위/아래 두 마디로 나눠 각각 다른 본에 묶으므로
+## 팔꿈치와 무릎이 접힌다. 손은 BoneAttachment3D 라 무기가 손을 따라간다.
+##
+## 반환: Node3D { "skel": Skeleton3D { "mesh": MeshInstance3D, hand_l, hand_r } }
+func humanoid_skeletal(cfg: Dictionary) -> Node3D:
+	var skin_c: Color = cfg.get("skin", Color(0.78, 0.62, 0.50))
+	var cloth: Color = cfg.get("cloth", Color(0.42, 0.34, 0.26))
+	var hair: Color = cfg.get("hair", Color(0.36, 0.24, 0.14))
+	var height: float = cfg.get("height", 1.8)
+	var bulk: float = cfg.get("bulk", 1.0)
+	var head_sc: float = cfg.get("head", 1.0)
+	var eye: Color = cfg.get("eye", Color(0.08, 0.08, 0.10))
+
+	var leg_h := height * 0.46
+	var torso_h := height * 0.34
+	var head_r := height * 0.085 * head_sc
+	var sh_w := height * 0.115 * bulk
+	var arm_len := height * 0.40
+	var half_arm := arm_len * 0.5
+	var half_leg := leg_h * 0.5
+
+	var rig := Node3D.new()
+	rig.name = "rig"
+	var skel := Skeleton3D.new()
+	skel.name = "skel"
+	rig.add_child(skel)
+
+	# ── 본 계층 (부모 기준 로컬 레스트) ──
+	var idx: Dictionary = {}
+	var add_bone := func(bname: String, parent: String, rest: Vector3) -> void:
+		var i := skel.get_bone_count()
+		skel.add_bone(bname)
+		idx[bname] = i
+		if parent != "":
+			skel.set_bone_parent(i, int(idx[parent]))
+		skel.set_bone_rest(i, Transform3D(Basis.IDENTITY, rest))
+		skel.set_bone_pose_position(i, rest)
+
+	add_bone.call("hips", "", Vector3(0, leg_h, 0))
+	add_bone.call("spine", "hips", Vector3(0, torso_h * 0.42, 0))
+	add_bone.call("chest", "spine", Vector3(0, torso_h * 0.40, 0))
+	add_bone.call("neck", "chest", Vector3(0, torso_h * 0.16, 0))
+	add_bone.call("head", "neck", Vector3(0, torso_h * 0.06, 0))
+	for side in [-1.0, 1.0]:
+		var sfx := "_l" if side < 0.0 else "_r"
+		add_bone.call("shoulder" + sfx, "chest", Vector3(sh_w * side, 0.0, 0))
+		add_bone.call("upperarm" + sfx, "shoulder" + sfx, Vector3(sh_w * 0.35 * side, 0, 0))
+		add_bone.call("forearm" + sfx, "upperarm" + sfx, Vector3(0, -half_arm, 0))
+		add_bone.call("hand" + sfx, "forearm" + sfx, Vector3(0, -half_arm, 0))
+		add_bone.call("thigh" + sfx, "hips", Vector3(sh_w * 0.45 * side, 0, 0))
+		add_bone.call("shin" + sfx, "thigh" + sfx, Vector3(0, -half_leg, 0))
+		add_bone.call("foot" + sfx, "shin" + sfx, Vector3(0, -half_leg, 0))
+
+	# ── 메시: 각 조각을 해당 본의 **레스트 좌표계 원점 기준**으로 그린다 ──
+	var mb := MeshBuilder.new()
+
+	# 몸통 (hips → spine → chest)
+	mb.bone(int(idx["hips"]))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, leg_h + torso_h * 0.20, 0)),
+		Vector3(sh_w * 1.42, torso_h * 0.46, sh_w * 0.86), cloth)
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, leg_h + torso_h * 0.30, 0)),
+		Vector3(sh_w * 1.62, torso_h * 0.10, sh_w * 1.02), Color(0.24, 0.17, 0.11))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, leg_h - torso_h * 0.06, 0)),
+		Vector3(sh_w * 1.50, torso_h * 0.20, sh_w * 0.94), cloth.darkened(0.08))
+	mb.bone(int(idx["chest"]))
+	var chest_y := leg_h + torso_h * 0.82
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, chest_y, 0)),
+		Vector3(sh_w * 1.74, torso_h * 0.46, sh_w * 0.98), cloth.lightened(0.05))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, chest_y + torso_h * 0.24, 0)),
+		Vector3(sh_w * 2.05, torso_h * 0.20, sh_w * 1.00), cloth.darkened(0.14))
+	mb.bone(int(idx["neck"]))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, leg_h + torso_h * 0.98, 0)),
+		Vector3(sh_w * 0.52, torso_h * 0.12, sh_w * 0.52), skin_c.darkened(0.10))
+
+	# 머리
+	var head_y := leg_h + torso_h * 1.04 + head_r
+	mb.bone(int(idx["head"]))
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, head_y, 0)),
+		Vector3(head_r * 1.6, head_r * 2.0, head_r * 1.7), skin_c)
+	mb.box(Transform3D(Basis.IDENTITY, Vector3(0, head_y + head_r * 0.62, -head_r * 0.08)),
+		Vector3(head_r * 1.7, head_r * 0.8, head_r * 1.8), hair)
+	if cfg.get("beard", false):
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(0, head_y - head_r * 0.55, head_r * 0.72)),
+			Vector3(head_r * 1.1, head_r * 1.0, head_r * 0.4), hair)
+	for ex in [-0.38, 0.38]:
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(head_r * ex, head_y + head_r * 0.15, head_r * 0.86)),
+			Vector3(head_r * 0.30, head_r * 0.22, head_r * 0.08), eye)
+	if cfg.get("horns", false):
+		for hx in [-0.7, 0.7]:
+			mb.cone(Transform3D(Basis(Vector3.FORWARD, -0.5 * signf(hx)),
+				Vector3(head_r * hx, head_y + head_r * 0.7, 0)),
+				head_r * 0.22, head_r * 1.2, 5, Color(0.86, 0.82, 0.70))
+
+	# 팔·다리 — 위/아래 마디를 다른 본에 묶어야 관절이 접힌다
+	for side in [-1.0, 1.0]:
+		var sfx2 := "_l" if side < 0.0 else "_r"
+		var shoulder_y: float = chest_y
+		var ax: float = sh_w * side * 1.35
+		# 어깨 패드
+		mb.bone(int(idx["shoulder" + sfx2]))
+		mb.box(Transform3D(Basis(Vector3.FORWARD, -0.22 * side),
+			Vector3(sh_w * 0.98 * side, shoulder_y + torso_h * 0.18, 0)),
+			Vector3(sh_w * 0.62, sh_w * 0.34, sh_w * 1.00), cloth.darkened(0.24))
+		# 위팔
+		mb.bone(int(idx["upperarm" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(ax, shoulder_y + torso_h * 0.18 - half_arm * 0.5, 0)),
+			Vector3(sh_w * 0.46, half_arm, sh_w * 0.46), cloth.lightened(0.06))
+		# 아래팔
+		mb.bone(int(idx["forearm" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(ax, shoulder_y + torso_h * 0.18 - half_arm * 1.5, 0)),
+			Vector3(sh_w * 0.42, half_arm, sh_w * 0.42), cloth.lightened(0.02))
+		# 손
+		mb.bone(int(idx["hand" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(ax, shoulder_y + torso_h * 0.18 - half_arm * 2.0 + sh_w * 0.12, 0)),
+			Vector3(sh_w * 0.5, sh_w * 0.34, sh_w * 0.5), skin_c)
+		# 허벅지 / 정강이 / 발
+		var lx: float = sh_w * side * 0.45
+		mb.bone(int(idx["thigh" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY, Vector3(lx, leg_h - half_leg * 0.5, 0)),
+			Vector3(sh_w * 0.55, half_leg, sh_w * 0.55), cloth.darkened(0.2))
+		mb.bone(int(idx["shin" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY, Vector3(lx, leg_h - half_leg * 1.5, 0)),
+			Vector3(sh_w * 0.50, half_leg, sh_w * 0.50), cloth.darkened(0.26))
+		mb.bone(int(idx["foot" + sfx2]))
+		mb.box(Transform3D(Basis.IDENTITY,
+			Vector3(lx, leg_h * 0.03, sh_w * 0.12)),
+			Vector3(sh_w * 0.6, leg_h * 0.10, sh_w * 0.85), Color(0.24, 0.18, 0.13))
+
+	var mi := MeshInstance3D.new()
+	mi.name = "mesh"
+	mi.mesh = mb.commit()
+	mi.material_override = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "cloth")
+	skel.add_child(mi)
+	mi.skeleton = mi.get_path_to(skel)
+	mi.skin = skel.create_skin_from_rest_transforms()
+
+	# 손 부착점 — 무기/방패가 손 본을 따라간다
+	for sfx3 in ["_l", "_r"]:
+		var att := BoneAttachment3D.new()
+		att.name = "hand" + sfx3
+		att.bone_name = "hand" + sfx3
+		skel.add_child(att)
+
+	rig.set_meta("skeletal", true)
+	return rig

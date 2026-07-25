@@ -123,7 +123,7 @@ func _build_rig() -> void:
 			rig.add_child(body)
 			body.add_child(mi)
 		_:
-			rig = MeshFactory.humanoid(rc)
+			rig = MeshFactory.humanoid_skeletal(rc)
 	add_child(rig)
 	anim = RigAnimator.new(rig)
 

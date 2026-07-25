@@ -6,6 +6,7 @@ extends RefCounted
 
 var st: SurfaceTool
 var count := 0
+var _bone := -1        # >=0 이면 이후 정점을 이 본에 강체 바인딩한다
 
 func _init() -> void:
 	st = SurfaceTool.new()
@@ -16,10 +17,19 @@ func smooth(on: bool) -> MeshBuilder:
 	st.set_smooth_group(0 if on else -1)
 	return self
 
+## 이후 추가되는 정점을 이 본에 묶는다(가중치 1의 강체 바인딩).
+## 팔·다리를 위/아래 두 마디로 나눠 각각 다른 본에 묶으면 관절이 접힌다.
+func bone(idx: int) -> MeshBuilder:
+	_bone = idx
+	return self
+
 # ─────────────────────────────────────────────── 저수준
 func _v(p: Vector3, c: Color, uv: Vector2 = Vector2.ZERO) -> void:
 	st.set_color(c)
 	st.set_uv(uv)
+	if _bone >= 0:
+		st.set_bones(PackedInt32Array([_bone, 0, 0, 0]))
+		st.set_weights(PackedFloat32Array([1.0, 0.0, 0.0, 0.0]))
 	st.add_vertex(p)
 	count += 1
 

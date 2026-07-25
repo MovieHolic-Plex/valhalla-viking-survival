@@ -21,6 +21,11 @@ var is_quad := false
 var is_flyer := false
 var base_hips_y := 0.0
 
+# ── 스켈레탈 경로 ──
+var skel: Skeleton3D = null
+var bi: Dictionary = {}          # 본 이름 -> 인덱스
+var _rest_hips := Vector3.ZERO
+
 var t := 0.0
 var swing := 0.0                # 0~1 공격 진행도
 var swing_kind := "slash"
@@ -30,6 +35,14 @@ var stagger := 0.0
 
 func _init(r: Node3D) -> void:
 	rig = r
+	skel = r.get_node_or_null("skel") as Skeleton3D
+	if skel != null:
+		for n in MeshFactory.BONES:
+			var i := skel.find_bone(n)
+			if i >= 0:
+				bi[n] = i
+		if bi.has("hips"):
+			_rest_hips = skel.get_bone_rest(int(bi["hips"])).origin
 	hips = r.get_node_or_null("hips")
 	if hips:
 		head = hips.get_node_or_null("head_pivot")
@@ -68,7 +81,9 @@ func update(delta: float, speed01: float, airborne: bool, swimming: bool,
 	if dead:
 		_pose_dead(delta)
 		return
-	if is_quad:
+	if skel != null:
+		_anim_skeletal(delta, speed01, airborne, swimming)
+	elif is_quad:
 		_anim_quad(delta, speed01, airborne)
 	else:
 		_anim_humanoid(delta, speed01, airborne, swimming)
@@ -145,6 +160,109 @@ func _anim_humanoid(delta: float, speed01: float, airborne: bool, swimming: bool
 	if head:
 		head.rotation.y = sin(t * 0.4) * 0.10
 
+
+# ─────────────────────────────────────────────── 스켈레탈 인간형
+func _bone_rot(bname: String, x: float, y: float = 0.0, z: float = 0.0) -> void:
+	if not bi.has(bname):
+		return
+	skel.set_bone_pose_rotation(int(bi[bname]),
+		Quaternion(Basis.from_euler(Vector3(x, y, z))))
+
+func _bone_lerp(bname: String, x: float, y: float, z: float, w: float) -> void:
+	if not bi.has(bname):
+		return
+	var i := int(bi[bname])
+	var cur := skel.get_bone_pose_rotation(i)
+	var want := Quaternion(Basis.from_euler(Vector3(x, y, z)))
+	skel.set_bone_pose_rotation(i, cur.slerp(want, clampf(w, 0.0, 1.0)))
+
+## 본을 직접 포즈한다. 팔꿈치/무릎이 실제로 접히는 것이 노드 회전 방식과의 차이.
+func _anim_skeletal(delta: float, speed01: float, airborne: bool,
+		swimming: bool) -> void:
+	var amp: float = lerpf(0.06, 0.95, speed01)
+	var s := sin(t * 2.0)
+	var c := cos(t * 2.0)
+	var k: float = clampf(delta * 9.0, 0.0, 1.0)
+
+	if swimming:
+		_bone_lerp("hips", -1.15, 0.0, 0.0, k)
+		if bi.has("hips"):
+			skel.set_bone_pose_position(int(bi["hips"]),
+				_rest_hips - Vector3(0, 0.45, 0))
+		_bone_lerp("upperarm_l", -1.4 + s * 0.9, 0, 0, k)
+		_bone_lerp("upperarm_r", -1.4 - s * 0.9, 0, 0, k)
+		_bone_lerp("forearm_l", -0.5, 0, 0, k)
+		_bone_lerp("forearm_r", -0.5, 0, 0, k)
+		_bone_lerp("thigh_l", -1.2 + c * 0.35, 0, 0, k)
+		_bone_lerp("thigh_r", -1.2 - c * 0.35, 0, 0, k)
+		return
+
+	# 몸통: 걸을 때 위아래로 통통 튀고 좌우로 살짝 비튼다
+	if bi.has("hips"):
+		var bob := absf(s) * 0.05 * speed01 - (0.06 if airborne else 0.0)
+		skel.set_bone_pose_position(int(bi["hips"]), _rest_hips + Vector3(0, bob, 0))
+	var lean := stagger * sin(t * 30.0) * 0.06
+	_bone_lerp("hips", lean, sin(t * 2.0) * 0.06 * speed01, 0.0, k)
+	_bone_lerp("spine", speed01 * 0.10, -sin(t * 2.0) * 0.05 * speed01, 0.0, k)
+	_bone_lerp("chest", 0.0, sin(t * 2.0) * 0.07 * speed01, 0.0, k)
+	_bone_lerp("head", 0.0, sin(t * 0.4) * 0.10, 0.0, k * 0.5)
+
+	# 다리: 허벅지가 앞뒤로 흔들리고 뒤로 갈 때 무릎이 접힌다
+	if airborne:
+		_bone_lerp("thigh_l", -0.5, 0, 0, k)
+		_bone_lerp("thigh_r", 0.25, 0, 0, k)
+		_bone_lerp("shin_l", 0.9, 0, 0, k)
+		_bone_lerp("shin_r", 0.5, 0, 0, k)
+	else:
+		var tl := s * amp * 0.75
+		var tr := -s * amp * 0.75
+		_bone_lerp("thigh_l", tl, 0, 0, k)
+		_bone_lerp("thigh_r", tr, 0, 0, k)
+		# 무릎은 다리가 뒤로 갈 때(각도가 음수) 접힌다. 절대 앞으로 꺾이지 않게 0 하한.
+		_bone_lerp("shin_l", maxf(-tl, 0.0) * 1.55, 0, 0, k)
+		_bone_lerp("shin_r", maxf(-tr, 0.0) * 1.55, 0, 0, k)
+		_bone_lerp("foot_l", -tl * 0.35, 0, 0, k)
+		_bone_lerp("foot_r", -tr * 0.35, 0, 0, k)
+
+	# 팔
+	var idle_l := -s * amp * 0.55 + sin(t * 0.6) * 0.03
+	var idle_r := s * amp * 0.55 + cos(t * 0.55) * 0.03
+
+	if swing > 0.0:
+		var p := 1.0 - swing
+		match swing_kind:
+			"stab":
+				_bone_rot("upperarm_r", lerpf(-0.4, -1.75, sin(p * PI)))
+				_bone_rot("forearm_r", lerpf(-1.5, -0.15, sin(p * PI)))
+			"bow":
+				_bone_rot("upperarm_r", -1.45, 0.0, 0.25)
+				_bone_rot("forearm_r", -1.1)
+				_bone_rot("upperarm_l", -1.45, 0.0, -0.25)
+				_bone_rot("forearm_l", -0.2)
+			"chop":
+				var pc := smoothstep(0.0, 0.55, p)
+				_bone_rot("upperarm_r", lerpf(-2.5, 0.9, pc), 0.0, 0.15)
+				_bone_rot("forearm_r", lerpf(-1.6, -0.1, pc))
+			_:
+				var ps := smoothstep(0.0, 0.5, p)
+				_bone_rot("upperarm_r", lerpf(-2.3, 0.75, ps), 0.0,
+					lerpf(-0.9, 0.7, smoothstep(0.0, 0.6, p)))
+				_bone_rot("forearm_r", lerpf(-1.4, -0.15, ps))
+		if swing_kind != "bow":
+			_bone_lerp("upperarm_l", idle_l * 0.3, 0, 0, k)
+			_bone_lerp("forearm_l", -0.35, 0, 0, k)
+	else:
+		_bone_lerp("upperarm_r", idle_r, 0.0, 0.0, k)
+		# 팔꿈치는 항상 살짝 굽어 있어야 사람처럼 보인다
+		_bone_lerp("forearm_r", -0.30 - absf(idle_r) * 0.5, 0, 0, k)
+		var target_l: float = lerpf(idle_l, -1.5, block_amt)
+		_bone_lerp("upperarm_l", target_l, 0.0, -0.35 * block_amt, k)
+		_bone_lerp("forearm_l", lerpf(-0.30 - absf(idle_l) * 0.5, -1.1, block_amt),
+			0, 0, k)
+	# 어깨는 팔 스윙을 살짝 따라간다
+	_bone_lerp("shoulder_r", 0.0, 0.0, -0.10 * speed01, k * 0.6)
+	_bone_lerp("shoulder_l", 0.0, 0.0, 0.10 * speed01, k * 0.6)
+
 # ─────────────────────────────────────────────── 네발짐승
 func _anim_quad(delta: float, speed01: float, airborne: bool) -> void:
 	if body == null:
@@ -169,6 +287,15 @@ func _anim_quad(delta: float, speed01: float, airborne: bool) -> void:
 		body.rotation.z = sin(t * 26.0) * 0.08 * stagger
 
 func _pose_dead(delta: float) -> void:
+	if skel != null:
+		var k: float = clampf(delta * 3.0, 0.0, 1.0)
+		_bone_lerp("hips", -1.45, 0.0, 0.35, k)
+		_bone_lerp("spine", 0.35, 0, 0, k)
+		_bone_lerp("upperarm_l", 0.9, 0, -0.6, k)
+		_bone_lerp("upperarm_r", 0.9, 0, 0.6, k)
+		_bone_lerp("thigh_l", 0.5, 0, 0, k)
+		_bone_lerp("thigh_r", 0.35, 0, 0, k)
+		return
 	var root := hips if hips else body
 	if root == null:
 		return

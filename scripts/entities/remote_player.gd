@@ -23,7 +23,7 @@ var _first := true
 
 func _ready() -> void:
 	add_to_group("remote_player")
-	rig = MeshFactory.humanoid({
+	rig = MeshFactory.humanoid_skeletal({
 		"skin": Color(0.78, 0.62, 0.50),
 		"cloth": Color(0.36, 0.30, 0.24),
 		"hair": Color(0.32, 0.22, 0.13),
