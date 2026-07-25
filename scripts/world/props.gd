@@ -97,6 +97,100 @@ static func grass_of(biome: int) -> Dictionary:
 		B.MOUNTAIN: return {"n": 0, "m": Color.WHITE, "h": 1.0}
 		_: return {"n": 0, "m": Color.WHITE, "h": 1.0}
 
+## 바이옴별 지면 잡동사니 [종류, 청크당 개수, 최대 경사].
+## 발헤임의 바닥은 결코 비어 있지 않다 — 통나무·돌무더기·고사리·뿌리가 깔려 있다.
+static func clutter_of(biome: int) -> Array:
+	match biome:
+		B.MEADOWS:
+			return [["log", 2.0, 0.35], ["pile", 4.0, 0.55], ["fern", 5.0, 0.40],
+				["root", 3.0, 0.45]]
+		B.BLACKFOREST:
+			return [["log", 5.0, 0.40], ["pile", 5.0, 0.60], ["fern", 10.0, 0.45],
+				["root", 6.0, 0.50]]
+		B.SWAMP:
+			return [["log", 6.0, 0.40], ["pile", 2.0, 0.50], ["fern", 4.0, 0.40],
+				["root", 8.0, 0.45]]
+		B.MOUNTAIN:
+			return [["pile", 9.0, 0.75]]
+		B.PLAINS:
+			return [["pile", 3.0, 0.55], ["fern", 2.0, 0.35], ["root", 2.0, 0.45]]
+		B.MISTLANDS:
+			return [["log", 3.0, 0.50], ["pile", 7.0, 0.70], ["root", 7.0, 0.55]]
+		B.ASHLANDS:
+			return [["pile", 8.0, 0.70], ["root", 4.0, 0.55]]
+		_:
+			return []
+
+## 잡동사니는 상호작용 대상이 아니라 순수 시각물이라 항상 멀티메시로 그린다.
+static func _build_clutter(parent: Node3D, gen: WorldGen, cx: int, cz: int,
+		biome: int, detailed: bool) -> void:
+	var rules_c := clutter_of(biome)
+	if rules_c.is_empty():
+		return
+	var rng := gen.chunk_rng(cx, cz, 1777)
+	var ox := float(cx) * Const.CHUNK_SIZE
+	var oz := float(cz) * Const.CHUNK_SIZE
+	var buckets: Dictionary = {}
+	for rule in rules_c:
+		var rtype: String = rule[0]
+		var cnt: float = float(rule[1]) * (1.0 if detailed else 0.45)
+		var max_slope: float = float(rule[2])
+		var n := int(cnt)
+		if rng.randf() < (cnt - float(n)):
+			n += 1
+		for i in range(n):
+			var px := ox + rng.randf() * Const.CHUNK_SIZE
+			var pz := oz + rng.randf() * Const.CHUNK_SIZE
+			var h := gen.height(px, pz)
+			if h < Const.WATER_LEVEL + 0.3:
+				continue
+			if gen.biome_from(px, pz, h) != biome:
+				continue
+			if gen.slope_at(px, pz) > max_slope:
+				continue
+			var sv := int(rng.randi())
+			var scl := rng.randf_range(0.8, 1.35)
+			var key := rtype + ":" + str(sv % 6)
+			if not buckets.has(key):
+				buckets[key] = {"type": rtype, "sv": sv, "xf": []}
+			buckets[key]["xf"].append(Transform3D(
+				Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(scl, scl, scl)),
+				Vector3(px - ox, h - 0.05, pz - oz)))
+
+	for key in buckets:
+		var b: Dictionary = buckets[key]
+		var xfs: Array = b["xf"]
+		if xfs.is_empty():
+			continue
+		var sv2 := int(b["sv"])
+		var mesh: Mesh
+		var mat: Material
+		match str(b["type"]):
+			"log":
+				mesh = MeshFactory.fallen_log(sv2)
+				mat = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "bark")
+			"pile":
+				mesh = MeshFactory.stone_pile(sv2)
+				mat = MatLib.flat(Color.WHITE, 0.96, 0.0, 0.0, "rock")
+			"fern":
+				mesh = MeshFactory.fern(sv2)
+				mat = MatLib.leaf_card()
+			_:
+				mesh = MeshFactory.ground_root(sv2)
+				mat = MatLib.flat(Color.WHITE, 0.94, 0.0, 0.0, "bark")
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = mesh
+		mm.instance_count = xfs.size()
+		for i in xfs.size():
+			mm.set_instance_transform(i, xfs[i])
+		var mmi := MultiMeshInstance3D.new()
+		mmi.multimesh = mm
+		mmi.material_override = mat
+		mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if detailed \
+			else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		parent.add_child(mmi)
+
 # ═══════════════════════════════════════════════ 배치
 ## detailed=true 면 상호작용 가능한 노드, false 면 멀티메시 시각물만.
 static func populate(chunk: TerrainChunk, gen: WorldGen, detailed: bool,
@@ -174,6 +268,7 @@ static func populate(chunk: TerrainChunk, gen: WorldGen, detailed: bool,
 		_build_multimesh(parent, mm_bucket)
 
 	_build_grass(parent, gen, cx, cz, center_b, detailed)
+	_build_clutter(parent, gen, cx, cz, center_b, detailed)
 
 static func _make_node(rtype: String, rsub: String, sv: int,
 		rng: RandomNumberGenerator) -> ResourceNode:

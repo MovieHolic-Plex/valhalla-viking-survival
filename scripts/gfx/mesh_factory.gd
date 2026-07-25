@@ -958,3 +958,90 @@ func altar(biome_tier: int) -> Mesh:
 		stone.lightened(0.12))
 	_cache[k] = mb.commit()
 	return _cache[k]
+
+# ═══════════════════════════════════════════════════════ 지면 잡동사니
+## 쓰러진 통나무 — 이끼 낀 채로 땅에 누워 있다
+func fallen_log(seed_v: int) -> Mesh:
+	var k := _key(["flog", seed_v])
+	if _cache.has(k):
+		return _cache[k]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var mb := MeshBuilder.new()
+	var len_v := rng.randf_range(2.4, 5.0)
+	var r := rng.randf_range(0.22, 0.42)
+	var bark := Color(0.30, 0.23, 0.16)
+	mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, r, -len_v * 0.5)),
+		r, r * 0.82, len_v, 8, bark)
+	# 잘린 단면
+	mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, r, -len_v * 0.5)),
+		r * 0.96, r * 0.96, 0.05, 8, Color(0.62, 0.50, 0.34))
+	# 위에 낀 이끼
+	for i in range(5):
+		var t := rng.randf()
+		mb.sphere(Vector3(rng.randf_range(-0.1, 0.1), r * 1.5,
+			-len_v * 0.5 + len_v * t), rng.randf_range(0.16, 0.28), 6, 3,
+			Color(0.20, 0.30, 0.13), Vector3(1.2, 0.35, 1.2))
+	# 부러진 잔가지
+	for i in range(2):
+		var a := rng.randf() * TAU
+		var p := Vector3(0, r, -len_v * 0.5 + len_v * rng.randf())
+		mb.rod(p, p + Vector3(cos(a) * 0.7, 0.45, sin(a) * 0.7), r * 0.16, 4,
+			bark.darkened(0.2))
+	_cache[k] = mb.commit()
+	return _cache[k]
+
+## 작은 돌무더기
+func stone_pile(seed_v: int) -> Mesh:
+	var k := _key(["spile", seed_v])
+	if _cache.has(k):
+		return _cache[k]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var mb := MeshBuilder.new()
+	for i in range(rng.randi_range(3, 6)):
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(0.0, 0.55)
+		var sz := rng.randf_range(0.14, 0.34)
+		mb.rock(Vector3(cos(a) * d, sz * 0.5, sin(a) * d), sz, seed_v + i * 31,
+			Color(0.36, 0.34, 0.31), 6, 4, 0.34, Vector3(1.0, 0.7, 1.0),
+			Color(0.16, 0.22, 0.09), 0.55)
+	_cache[k] = mb.commit()
+	return _cache[k]
+
+## 고사리 — 잎 카드를 부채꼴로 펼친 덤불
+func fern(seed_v: int) -> Mesh:
+	var k := _key(["fern", seed_v])
+	if _cache.has(k):
+		return _cache[k]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var mb := MeshBuilder.new()
+	var n := rng.randi_range(4, 6)
+	for i in range(n):
+		var a := TAU * float(i) / float(n) + rng.randf_range(-0.3, 0.3)
+		var d := rng.randf_range(0.08, 0.22)
+		var sz := rng.randf_range(0.26, 0.46)
+		mb.card(Vector3(cos(a) * d, sz * 0.42, sin(a) * d), sz, sz * 0.62,
+			-a + PI * 0.5, rng.randf_range(0.55, 1.05),
+			Color(0.16, 0.26, 0.11).lightened(rng.randf_range(0.0, 0.18)))
+	_cache[k] = mb.commit()
+	return _cache[k]
+
+## 드러난 나무 뿌리 / 잔가지 더미
+func ground_root(seed_v: int) -> Mesh:
+	var k := _key(["groot", seed_v])
+	if _cache.has(k):
+		return _cache[k]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_v
+	var mb := MeshBuilder.new()
+	var col := Color(0.28, 0.21, 0.15)
+	for i in range(rng.randi_range(3, 5)):
+		var a := rng.randf() * TAU
+		var l := rng.randf_range(0.6, 1.6)
+		var p0 := Vector3(cos(a) * 0.1, 0.05, sin(a) * 0.1)
+		var p1 := p0 + Vector3(cos(a) * l, rng.randf_range(0.05, 0.25), sin(a) * l)
+		mb.rod(p0, p1, rng.randf_range(0.05, 0.11), 5, col)
+	_cache[k] = mb.commit()
+	return _cache[k]

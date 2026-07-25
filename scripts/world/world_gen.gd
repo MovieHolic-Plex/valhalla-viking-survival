@@ -16,6 +16,9 @@ var _mtn: FastNoiseLite       # 산맥
 var _biome: FastNoiseLite     # 바이옴 경계 흔들기
 var _swamp: FastNoiseLite     # 늪 패치
 var _forest: FastNoiseLite    # 숲 밀도
+var _ridge: FastNoiseLite     # 능선/바위 노두
+var _terr: FastNoiseLite      # 단구(테라스) 위치
+var _erode: FastNoiseLite     # 골짜기 침식
 
 func _init(sv: int = 0) -> void:
 	seed_value = sv
@@ -26,6 +29,9 @@ func _init(sv: int = 0) -> void:
 	_biome = _mk(sv + 5, 0.0021, 2, FastNoiseLite.TYPE_SIMPLEX)
 	_swamp = _mk(sv + 6, 0.0019, 2, FastNoiseLite.TYPE_SIMPLEX)
 	_forest = _mk(sv + 7, 0.012, 2, FastNoiseLite.TYPE_SIMPLEX)
+	_ridge = _mk(sv + 8, 0.0125, 3, FastNoiseLite.TYPE_SIMPLEX)
+	_terr = _mk(sv + 9, 0.0034, 2, FastNoiseLite.TYPE_SIMPLEX)
+	_erode = _mk(sv + 10, 0.0058, 3, FastNoiseLite.TYPE_SIMPLEX)
 
 static func _mk(sv: int, freq: float, oct: int, type: int) -> FastNoiseLite:
 	var n := FastNoiseLite.new()
@@ -57,6 +63,32 @@ func base_height(x: float, z: float) -> float:
 	var h := Const.WATER_LEVEL + (land - 0.545) * 98.0
 	h += _hill.get_noise_2d(x, z) * 6.0 * mask
 	h += _det.get_noise_2d(x, z) * 1.6
+
+	# ── 실루엣을 거칠게 만드는 세 겹 ──────────────────────────
+	# 1) 바위 노두: 능선 노이즈(|n| 을 뒤집어 날카로운 등성이를 만든다)를
+	#    군데군데 솟구치게 해 매끈한 언덕만 이어지지 않게 한다.
+	if mask > 0.05:
+		var rg := 1.0 - absf(_ridge.get_noise_2d(x, z))          # 0..1, 능선에서 1
+		# 1-|n| 은 얇은 선을 따라 솟구치므로 그대로 쓰면 칼날 같은 벽이 생긴다.
+		# 낮은 땅에서는 넓고 얕은 노두로, 고지대에서만 날카로운 바위 능선으로.
+		var rgm := smoothstep(0.55, 0.92, rg)
+		var high := smoothstep(Const.WATER_LEVEL + 45.0,
+			Const.WATER_LEVEL + 95.0, h)
+		h += rgm * mask * lerp(3.5, 11.0, high)
+		h += pow(rgm, 3.0) * mask * high * 10.0
+
+	# 2) 단구: 높이를 계단처럼 눌러 절벽-평지-절벽 구조를 만든다.
+	#    발헤임 지형이 "깎인 땅"처럼 보이는 이유가 이 층상 구조다.
+	var terr_amt := smoothstep(0.28, 0.68, _terr.get_noise_2d(x, z) * 0.5 + 0.5) * mask
+	# 물가까지 계단으로 만들면 해안이 인공적이라 충분히 높은 곳에만 적용한다
+	if terr_amt > 0.01 and h > Const.WATER_LEVEL + 14.0:
+		var step := 11.0
+		var q: float = floor(h / step) * step + step * 0.5
+		h = lerp(h, q, terr_amt * 0.26)
+
+	# 3) 골짜기 침식: 능선 사이를 파내 물길과 계곡을 만든다
+	var er := absf(_erode.get_noise_2d(x, z))
+	h -= smoothstep(0.30, 0.0, er) * mask * 4.5
 
 	# 산맥: 능선 노이즈를 더해 뾰족하게
 	var mn := _mtn.get_noise_2d(x, z)

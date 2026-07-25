@@ -8,8 +8,8 @@ const TIER_FAR := 6       # 이 거리 이내: 저해상도 지형만
 
 # 가까운 청크는 격자를 촘촘히 — 2.3m 격자에서는 능선이 각져 보인다
 const RES_NEAR := 48
-const RES_MID := 26
-const RES_FAR := 12
+const RES_MID := 34
+const RES_FAR := 20
 
 const BUILD_PER_FRAME := 1
 

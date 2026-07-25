@@ -96,6 +96,16 @@ func _find_pass(biome: int, prefer_high: bool, strict: bool) -> Vector3:
 				same += 1
 		if strict and (not inland or same < 7):
 			continue
+		# 협곡 바닥은 하늘이 안 보여 화면이 어두운 벽뿐이다 — 주변이 나보다
+		# 크게 솟아 있으면 버린다
+		var boxed := false
+		for j2 in range(8):
+			var a3 := TAU * float(j2) / 8.0
+			if gen.height(x + cos(a3) * 30.0, z + sin(a3) * 30.0) > h + 14.0:
+				boxed = true
+				break
+		if boxed:
+			continue
 		var sl := gen.slope_at(x, z)
 		var score := -absf(sl - 0.12) * 24.0 + float(same) * 2.0
 		if not strict and inland:
