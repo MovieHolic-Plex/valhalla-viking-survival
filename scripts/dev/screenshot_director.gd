@@ -449,6 +449,21 @@ func _ui_sequence(m, p) -> void:
 	await _wait(25)
 	await _shot("ui_build")
 
+	# 저장/불러오기 왕복 검증
+	var before_wood: int = p.inventory.count("wood")
+	var before_pos: Vector3 = p.global_position
+	var ok_save: bool = SaveSystem.save_game(p, m.build_system, "selftest")
+	p.inventory.remove_item("wood", before_wood)
+	p.global_position = before_pos + Vector3(50, 0, 50)
+	var ok_load: bool = SaveSystem.load_game(p, m.build_system, "selftest")
+	var after_wood: int = p.inventory.count("wood")
+	print("[TEST] save=", ok_save, " load=", ok_load,
+		" wood ", before_wood, "->", after_wood,
+		" pos_delta=", p.global_position.distance_to(before_pos))
+	print("[TEST] ", "PASS" if (ok_save and ok_load and after_wood == before_wood \
+		and p.global_position.distance_to(before_pos) < 1.0) else "FAIL")
+	SaveSystem.delete_save("selftest")
+
 func _coast() -> Vector3:
 	var gen := GameState.gen
 	var rng := RandomNumberGenerator.new()
