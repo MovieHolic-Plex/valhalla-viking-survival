@@ -240,26 +240,36 @@ func biome_from(x: float, z: float, h: float) -> int:
 ## 지면 색 — 바이옴 색 + 미세 변주 + 고도/경사 반영
 func ground_color(x: float, z: float, h: float, biome: int) -> Color:
 	var base: Color = Const.BIOME_GROUND[biome]
-	var v := _det.get_noise_2d(x * 0.5, z * 0.5) * 0.075
+	# 큰 스케일 얼룩(마른 풀 ↔ 짙은 이끼) + 잔 변주. 단색 평면을 깨는 핵심.
+	var macro := _det.get_noise_2d(x * 0.09, z * 0.09)
+	var v := _det.get_noise_2d(x * 0.5, z * 0.5) * 0.045
 	var c := Color(base.r + v, base.g + v, base.b + v * 0.8)
+	if macro > 0.0:
+		# 볕에 마른 부분 — 노랗고 밝게
+		c = c.lerp(Color(c.r * 1.55 + 0.045, c.g * 1.30 + 0.030, c.b * 0.80), macro * 0.55)
+	else:
+		# 그늘진 부분 — 어둡고 푸르게
+		c = c.lerp(Color(c.r * 0.62, c.g * 0.74, c.b * 0.80), -macro * 0.50)
 
 	# 해안선 모래
 	if biome != Const.Biome.MOUNTAIN and h < Const.WATER_LEVEL + 1.6:
 		var t := clampf((Const.WATER_LEVEL + 1.6 - h) / 2.4, 0.0, 1.0)
-		c = c.lerp(Color(0.68, 0.62, 0.45), t * 0.9)
+		c = c.lerp(Color(0.50, 0.44, 0.31), t * 0.92)
 	# 눈은 설산 바이옴에서만 — 그 외 고지대는 바위색으로 살짝 바랜다
 	if biome == Const.Biome.MOUNTAIN:
 		var t2 := clampf((h - (Const.WATER_LEVEL + 46.0)) / 22.0, 0.0, 1.0)
-		c = Color(0.52, 0.55, 0.58).lerp(Color(0.93, 0.95, 0.99), t2)
+		c = Color(0.40, 0.43, 0.47).lerp(Color(0.84, 0.87, 0.93), t2)
 	elif h > Const.WATER_LEVEL + 110.0:
 		# 아주 높은 곳만 바위색이 비친다
 		var t3 := clampf((h - (Const.WATER_LEVEL + 110.0)) / 50.0, 0.0, 1.0)
-		c = c.lerp(Color(0.50, 0.48, 0.44), t3 * 0.45)
+		c = c.lerp(Color(0.34, 0.32, 0.29), t3 * 0.5)
 	# 애쉬랜드의 용암빛 균열
 	if biome == Const.Biome.ASHLANDS:
 		var g := _forest.get_noise_2d(x, z)
 		if g > 0.55:
 			c = c.lerp(Color(1.0, 0.35, 0.08), (g - 0.55) * 2.0)
+	# 알파 = 암반 색 파라미터. 지형 셰이더가 경사면에서 이 값으로 바위를 섞는다.
+	c.a = float(Const.BIOME_ROCK_T.get(biome, 0.35))
 	return c
 
 # ─────────────────────────────────────────────────────── 배치 헬퍼

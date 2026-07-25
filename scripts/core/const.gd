@@ -34,28 +34,43 @@ const BIOME_KEY := {
 	Biome.ASHLANDS: "BIOME_ASHLANDS",
 }
 
-## 바이옴별 지면 색 (로우폴리 버텍스 컬러용)
+## 바이옴별 지면 색.
+## 발헤임의 지면은 채도가 낮은 올리브/카키 계열이다. 형광 초록이 되지 않도록
+## 녹색 채널을 낮추고 적색을 남겨 "마른 풀 섞인 이끼" 톤을 만든다.
 const BIOME_GROUND := {
-	Biome.OCEAN: Color(0.42, 0.40, 0.31),
-	Biome.MEADOWS: Color(0.26, 0.45, 0.14),
-	Biome.BLACKFOREST: Color(0.16, 0.26, 0.14),
-	Biome.SWAMP: Color(0.21, 0.20, 0.13),
-	Biome.MOUNTAIN: Color(0.86, 0.89, 0.94),
-	Biome.PLAINS: Color(0.60, 0.55, 0.26),
-	Biome.MISTLANDS: Color(0.16, 0.17, 0.19),
-	Biome.ASHLANDS: Color(0.26, 0.13, 0.11),
+	Biome.OCEAN: Color(0.34, 0.31, 0.23),
+	Biome.MEADOWS: Color(0.215, 0.255, 0.105),
+	Biome.BLACKFOREST: Color(0.115, 0.155, 0.090),
+	Biome.SWAMP: Color(0.150, 0.145, 0.095),
+	Biome.MOUNTAIN: Color(0.780, 0.815, 0.870),
+	Biome.PLAINS: Color(0.430, 0.385, 0.175),
+	Biome.MISTLANDS: Color(0.115, 0.125, 0.130),
+	Biome.ASHLANDS: Color(0.185, 0.095, 0.080),
+}
+
+## 절벽/암반 색 파라미터(0~1). 지형 버텍스 컬러의 알파로 실려 셰이더에서
+## 따뜻한 흑갈색 암반(0) ↔ 차갑고 밝은 화강암(1) 사이를 보간한다.
+const BIOME_ROCK_T := {
+	Biome.OCEAN: 0.35,
+	Biome.MEADOWS: 0.36,
+	Biome.BLACKFOREST: 0.30,
+	Biome.SWAMP: 0.16,
+	Biome.MOUNTAIN: 1.00,
+	Biome.PLAINS: 0.46,
+	Biome.MISTLANDS: 0.24,
+	Biome.ASHLANDS: 0.04,
 }
 
 ## 바이옴별 안개 색 / 밀도 — 발헤임 특유의 분위기를 좌우하는 값
 const BIOME_FOG := {
-	Biome.OCEAN: {"c": Color(0.55, 0.66, 0.76), "d": 0.0030},
-	Biome.MEADOWS: {"c": Color(0.62, 0.72, 0.78), "d": 0.0026},
-	Biome.BLACKFOREST: {"c": Color(0.32, 0.40, 0.38), "d": 0.0075},
-	Biome.SWAMP: {"c": Color(0.28, 0.30, 0.24), "d": 0.0110},
-	Biome.MOUNTAIN: {"c": Color(0.78, 0.84, 0.92), "d": 0.0060},
-	Biome.PLAINS: {"c": Color(0.72, 0.70, 0.55), "d": 0.0032},
-	Biome.MISTLANDS: {"c": Color(0.36, 0.38, 0.42), "d": 0.0260},
-	Biome.ASHLANDS: {"c": Color(0.42, 0.16, 0.10), "d": 0.0090},
+	Biome.OCEAN: {"c": Color(0.55, 0.66, 0.76), "d": 0.0018},
+	Biome.MEADOWS: {"c": Color(0.62, 0.72, 0.78), "d": 0.0015},
+	Biome.BLACKFOREST: {"c": Color(0.32, 0.40, 0.38), "d": 0.0042},
+	Biome.SWAMP: {"c": Color(0.28, 0.30, 0.24), "d": 0.0070},
+	Biome.MOUNTAIN: {"c": Color(0.78, 0.84, 0.92), "d": 0.0034},
+	Biome.PLAINS: {"c": Color(0.72, 0.70, 0.55), "d": 0.0019},
+	Biome.MISTLANDS: {"c": Color(0.36, 0.38, 0.42), "d": 0.0160},
+	Biome.ASHLANDS: {"c": Color(0.42, 0.16, 0.10), "d": 0.0055},
 }
 
 ## 바이옴 위험도(0~6). 진행 순서와 동일.

@@ -21,9 +21,15 @@ var _fog_color := Color(0.62, 0.72, 0.78)
 var _fog_density := 0.0012
 var _rng := RandomNumberGenerator.new()
 
-const SUN_DAY := Color(1.0, 0.94, 0.82)
-const SUN_DUSK := Color(1.0, 0.56, 0.28)
-const MOON_COL := Color(0.55, 0.66, 0.92)
+const SUN_DAY := Color(1.0, 0.955, 0.865)
+const SUN_DUSK := Color(1.0, 0.52, 0.24)
+const MOON_COL := Color(0.48, 0.60, 0.90)
+const SUN_ENERGY := 1.10      # 직사광 : 앰비언트 ≈ 2:1. 그림자는 또렷하되
+                              # 그늘진 비탈이 새까맣게 뭉개지지 않는 비율.
+const AMBIENT_DAY := 1.00
+const AMBIENT_NIGHT := 0.42   # 밤에도 실루엣은 보여야 한다 (달빛 + 산란광)
+
+var _ambient_target := AMBIENT_DAY
 
 func _ready() -> void:
 	name = "sky"
@@ -49,12 +55,18 @@ func _make_env() -> void:
 	_sky_mat.set_shader_parameter("ground_color", Color(0.14, 0.15, 0.16))
 	sky.sky_material = _sky_mat
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME
+	# 라디언스(환경광용 큐브맵)를 매 프레임 다시 굽지 않고 여러 프레임에 나눠 갱신한다.
+	# 구름이 세 겹이라 REALTIME 은 비싸고, 눈으로는 차이가 없다.
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 	e.sky = sky
 
+	# 앰비언트를 낮추고 태양을 올려야 그림자가 살아난다.
+	# 발헤임의 입체감은 "약한 하늘빛 + 강한 방향광"에서 나온다.
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	e.ambient_light_sky_contribution = 1.0
-	e.ambient_light_energy = 0.85
+	# 하늘빛 100% 로 두면 그늘이 새파랗게 물든다. 중성색을 절반 섞는다.
+	e.ambient_light_sky_contribution = 0.40
+	e.ambient_light_color = Color(0.60, 0.61, 0.58)
+	e.ambient_light_energy = AMBIENT_DAY
 	e.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 
 	# 안개 — 거리감과 분위기의 핵심
@@ -62,16 +74,17 @@ func _make_env() -> void:
 	e.fog_mode = Environment.FOG_MODE_EXPONENTIAL
 	e.fog_light_color = _fog_color
 	e.fog_light_energy = 1.0
-	e.fog_sun_scatter = 0.20
+	e.fog_sun_scatter = 0.34
 	e.fog_density = _fog_density
-	e.fog_sky_affect = 0.55
+	e.fog_sky_affect = 0.30
 	e.fog_height = Const.WATER_LEVEL + 12.0
 	e.fog_height_density = 0.02
-	e.fog_aerial_perspective = 0.12
+	# 원경을 하늘색으로 밀어내는 대기 원근 — 발헤임 원경의 푸른 기운
+	e.fog_aerial_perspective = 0.20
 
 	# 볼류메트릭 포그 — 빛줄기
-	e.volumetric_fog_enabled = true
-	e.volumetric_fog_density = 0.008
+	e.volumetric_fog_enabled = false
+	e.volumetric_fog_density = 0.005
 	e.volumetric_fog_albedo = Color(0.85, 0.88, 0.92)
 	e.volumetric_fog_emission_energy = 0.0
 	e.volumetric_fog_length = 96.0
@@ -79,30 +92,38 @@ func _make_env() -> void:
 	e.volumetric_fog_gi_inject = 0.4
 	e.volumetric_fog_ambient_inject = 0.6
 
-	# 톤매핑 + 블룸 — 저해상도 텍스처를 고급스럽게 만드는 부분
-	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	e.tonemap_exposure = 1.05
-	e.tonemap_white = 6.0
+	# 톤매핑 + 블룸. ACES 는 밝은 부분이 흰색으로 날아가지 않고 색을 유지해서
+	# 발헤임 특유의 "부드러운 하이라이트 + 짙은 그림자"에 가깝다.
+	e.tonemap_mode = Environment.TONE_MAPPER_ACES
+	e.tonemap_exposure = 1.0
+	e.tonemap_white = 8.0
 	e.glow_enabled = true
-	e.glow_intensity = 0.55
-	e.glow_strength = 1.0
-	e.glow_bloom = 0.16
+	e.glow_intensity = 0.42
+	e.glow_strength = 1.05
+	e.glow_bloom = 0.10
 	e.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
-	e.glow_hdr_threshold = 0.92
+	e.glow_hdr_threshold = 1.05
+	e.glow_hdr_scale = 2.2
 	e.set_glow_level(1, 0.0)
+	e.set_glow_level(2, 0.4)
 	e.set_glow_level(3, 0.9)
-	e.set_glow_level(5, 0.7)
+	e.set_glow_level(4, 0.8)
+	e.set_glow_level(5, 0.55)
 
+	# 접지 그림자 — 풀·바위·건물이 땅에 붙어 보이게 하는 결정적 요소
 	e.ssao_enabled = true
-	e.ssao_radius = 1.2
-	e.ssao_intensity = 0.9
-	e.ssao_power = 1.4
+	e.ssao_radius = 1.8
+	e.ssao_intensity = 1.8
+	e.ssao_power = 2.0
+	e.ssao_detail = 0.6
+	e.ssao_horizon = 0.10
 	e.ssil_enabled = false
 
+	# 채도를 1 아래로 내린다. 형광 초록의 원인이 여기 있었다.
 	e.adjustment_enabled = true
-	e.adjustment_saturation = 1.12
-	e.adjustment_contrast = 1.06
-	e.adjustment_brightness = 1.0
+	e.adjustment_saturation = 0.97
+	e.adjustment_contrast = 1.04
+	e.adjustment_brightness = 0.98
 
 	env = WorldEnvironment.new()
 	env.environment = e
@@ -118,17 +139,21 @@ func _make_lights() -> void:
 	sun = DirectionalLight3D.new()
 	sun.name = "sun"
 	sun.light_color = SUN_DAY
-	sun.light_energy = 1.15
+	sun.light_energy = SUN_ENERGY
+	sun.light_specular = 0.5
 	sun.shadow_enabled = true
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
-	sun.directional_shadow_max_distance = 220.0
-	sun.directional_shadow_split_1 = 0.06
-	sun.directional_shadow_split_2 = 0.16
-	sun.directional_shadow_split_3 = 0.42
+	sun.directional_shadow_max_distance = 240.0
+	sun.directional_shadow_split_1 = 0.045
+	sun.directional_shadow_split_2 = 0.13
+	sun.directional_shadow_split_3 = 0.38
+	sun.directional_shadow_fade_start = 0.85
 	sun.directional_shadow_blend_splits = true
-	sun.shadow_bias = 0.02
-	sun.shadow_normal_bias = 0.7
-	sun.light_angular_distance = 1.2
+	sun.shadow_bias = 0.028
+	sun.shadow_normal_bias = 1.1
+	sun.shadow_blur = 1.3
+	# 태양 원반이 크면 그림자 가장자리가 부드러워진다
+	sun.light_angular_distance = 2.0
 	add_child(sun)
 
 	moon = DirectionalLight3D.new()
@@ -194,10 +219,11 @@ func _update_sun() -> void:
 	var day_amt := clampf(elev * 3.0, 0.0, 1.0)
 	var dusk := clampf(1.0 - absf(elev) * 4.0, 0.0, 1.0)
 
-	var storm_dim := 0.55 if weather == "storm" else (0.75 if weather == "rain" else 1.0)
-	sun.light_energy = lerpf(0.0, 1.15, day_amt) * storm_dim
+	var storm_dim := 0.45 if weather == "storm" else (0.68 if weather == "rain" else
+		(0.80 if weather in ["cloudy", "mist", "snow"] else 1.0))
+	sun.light_energy = lerpf(0.0, SUN_ENERGY, day_amt) * storm_dim
 	sun.light_color = SUN_DAY.lerp(SUN_DUSK, dusk)
-	moon.light_energy = lerpf(0.16, 0.0, day_amt)
+	moon.light_energy = lerpf(0.50, 0.0, day_amt)
 
 	var e := env.environment
 	# 하늘색 — 낮/밤/노을을 섞는다
@@ -223,20 +249,29 @@ func _update_sun() -> void:
 		cloudy = 0.85
 	_sky_mat.set_shader_parameter("cloud_amount", cloudy)
 
-	# 물에도 태양 정보를 넘겨 윤슬을 만든다
+	# 물에도 태양·하늘 정보를 넘겨 윤슬과 반사를 만든다
 	if MatLib.water_mat != null:
 		MatLib.water_mat.set_shader_parameter("sun_dir",
 			sun.global_transform.basis.z.normalized())
 		MatLib.water_mat.set_shader_parameter("sun_col",
 			sun.light_color * maxf(day_amt, 0.05))
+		MatLib.water_mat.set_shader_parameter("sky_col",
+			hor.lerp(top, 0.35) * maxf(day_amt, 0.10))
 		MatLib.water_mat.set_shader_parameter("choppy",
 			2.0 if weather == "storm" else (1.4 if weather == "rain" else 1.0))
+	MatLib.set_wind(wind_strength)
 
-	e.tonemap_exposure = lerpf(1.20, 0.88, day_amt)
-	e.adjustment_saturation = lerpf(0.85, 1.22, day_amt)
-	e.glow_intensity = lerpf(0.85, 0.55, day_amt)
-	e.volumetric_fog_density = lerpf(0.014, 0.007, day_amt) \
-		* (2.2 if weather == "mist" else 1.0)
+	# 앰비언트는 태양 고도를 따라 연속적으로 변해야 한다.
+	# is_night() 같은 on/off 로 끊으면 황혼에 화면이 통째로 까매진다.
+	var lit := clampf(elev * 2.2 + 0.42, 0.0, 1.0)
+	_ambient_target = lerpf(AMBIENT_NIGHT, AMBIENT_DAY, lit)
+
+	e.tonemap_exposure = lerpf(1.02, 0.95, day_amt)
+	e.adjustment_saturation = lerpf(0.78, 0.99, day_amt)
+	e.adjustment_contrast = lerpf(1.02, 1.05, day_amt)
+	e.glow_intensity = lerpf(0.66, 0.42, day_amt)
+	e.volumetric_fog_density = lerpf(0.010, 0.005, day_amt) \
+		* (2.4 if weather == "mist" else 1.0)
 
 func _update_weather(delta: float) -> void:
 	weather_timer -= delta
@@ -328,7 +363,7 @@ func _update_fog(delta: float) -> void:
 		sun.light_energy = 0.0
 		moon.light_energy = 0.0
 		return
-	e.ambient_light_energy = 0.85
+	e.ambient_light_energy = _ambient_target
 	e.fog_height = Const.WATER_LEVEL + 12.0
 	e.fog_height_density = 0.02
 
@@ -341,7 +376,7 @@ func _update_fog(delta: float) -> void:
 	else:
 		e.fog_light_color = _fog_color
 		e.fog_density = _fog_density
-		e.fog_sky_affect = 0.55
+		e.fog_sky_affect = 0.30
 	e.volumetric_fog_albedo = _fog_color.lightened(0.2)
 
 func _follow_player() -> void:

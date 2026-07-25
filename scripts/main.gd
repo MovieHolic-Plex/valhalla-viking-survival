@@ -47,6 +47,7 @@ func _handle_cli() -> void:
 		dir.out_dir = shots
 		dir.ui_only = args.has("--uionly")
 		dir.new_only = args.has("--newonly")
+		dir.quick = args.has("--quick")
 		add_child(dir)
 
 # ═══════════════════════════════════════════════ 타이틀
@@ -215,6 +216,9 @@ func _start_world(sv: int, from_save: bool) -> void:
 
 	water = Water.new()
 	add_child(water)
+
+	add_child(PostFX.new())
+	add_child(Ambience.new())
 
 	player = Player.new()
 	player.name = "player"

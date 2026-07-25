@@ -9,6 +9,7 @@ var _n := 0
 var keep_alive := true
 var ui_only := false
 var new_only := false
+var quick := false     # 그래픽 튜닝용 최소 세트 (초원/숲/해안)
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -64,11 +65,31 @@ func _find(biome: int, prefer_high: bool = false) -> Vector3:
 		var x := cos(a) * d
 		var z := sin(a) * d
 		var h := gen.height(x, z)
-		if h < Const.WATER_LEVEL + 1.0:
+		# 해안선에 붙으면 화면 절반이 바다가 된다 — 충분히 내륙/고지대만 고른다
+		if h < Const.WATER_LEVEL + 8.0:
 			continue
 		if gen.biome_from(x, z, h) != biome:
 			continue
-		var score := -gen.slope_at(x, z) * 20.0
+		# 주변 반경 70m 가 전부 육지여야 한다 — 해안 절벽에서 찍으면
+		# 화면 절반이 바다 반사로 하얗게 뜬다
+		var inland := true
+		var same := 0
+		for j in range(12):
+			var aa := TAU * float(j) / 12.0
+			var rr := 130.0 if j % 2 == 0 else 260.0
+			var sx := x + cos(aa) * rr
+			var sz := z + sin(aa) * rr
+			var sh := gen.height(sx, sz)
+			if sh < Const.WATER_LEVEL + 6.0:
+				inland = false
+				break
+			if gen.biome_from(sx, sz, sh) == biome:
+				same += 1
+		if not inland or same < 7:
+			continue
+		# 완전 평지보다 완만한 기복이 있는 곳이 보기 좋다
+		var sl := gen.slope_at(x, z)
+		var score := -absf(sl - 0.12) * 24.0 + float(same) * 2.0
 		if prefer_high:
 			score += h * 0.15
 		if score > best_score:
@@ -210,6 +231,23 @@ func _run() -> void:
 		print("[SHOT] === 신규 시스템 확인 완료 ===")
 		get_tree().quit()
 		return
+	if quick:
+		await _time(0.38)
+		await _weather("clear")
+		await _goto(_find(Const.Biome.MEADOWS), 0.6, -0.10, 4.0)
+		await _shot("q_meadows")
+		await _goto(_find(Const.Biome.MEADOWS), 3.14, 0.05, 2.4)
+		await _shot("q_character")
+		await _time(0.72)
+		await _goto(_find(Const.Biome.MEADOWS) + Vector3(30, 0, 20), 2.4, -0.05, 8.5)
+		await _shot("q_dusk_vista")
+		await _time(0.42)
+		await _weather("cloudy")
+		await _goto(_find(Const.Biome.BLACKFOREST), 1.2, -0.08, 5.0)
+		await _shot("q_blackforest")
+		print("[SHOT] === 퀵 확인 완료 ===")
+		get_tree().quit()
+		return
 
 	# 01 초원 아침
 	await _time(0.42)
@@ -222,7 +260,7 @@ func _run() -> void:
 	await _shot("character")
 
 	# 02 초원 황혼
-	await _time(0.76)
+	await _time(0.72)
 	await _shot("meadows_dusk")
 
 	# 03 초원 정오 · 원경

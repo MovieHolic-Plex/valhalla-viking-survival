@@ -7,6 +7,11 @@ var _cache: Dictionary = {}
 func _key(parts: Array) -> String:
 	return "|".join(parts.map(func(x): return str(x)))
 
+## 색 변주용. lightened() 는 흰색으로 끌어당겨 채도를 죽이므로
+## 잎·풀처럼 색이 중요한 곳에서는 밝기만 곱한다.
+func _shade(c: Color, k: float) -> Color:
+	return Color(minf(c.r * k, 1.0), minf(c.g * k, 1.0), minf(c.b * k, 1.0))
+
 # ═══════════════════════════════════════════════════════ 나무
 ## kind: beech(너도밤나무) / pine(소나무) / fir(전나무) / birch(자작나무)
 ##       oak(참나무) / ancient(고목·늪) / swamp_dead(고사목) / yggdrasil(미스트랜드)
@@ -24,30 +29,45 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 
 	match kind:
 		"pine":
-			h = rng.randf_range(11.0, 17.0)
-			r = h * 0.030
-			var bark := Color(0.30, 0.21, 0.14)
-			trunk.cyl(Transform3D.IDENTITY, r, r * 0.35, h, 7, bark)
-			var lc := Color(0.10, 0.22, 0.13)
-			var layers := 6
+			h = rng.randf_range(12.0, 19.0)
+			r = h * 0.032
+			var bark := Color(0.235, 0.150, 0.100)
+			trunk.cyl(Transform3D.IDENTITY, r, r * 0.30, h, 7, bark)
+			# 밑동에 죽은 잔가지 — 실루엣이 밋밋해지지 않는다
+			for i in range(4):
+				var ba := rng.randf() * TAU
+				var by := h * rng.randf_range(0.22, 0.40)
+				trunk.rod(Vector3(0, by, 0),
+					Vector3(cos(ba), -0.25, sin(ba)) * h * 0.10 + Vector3(0, by, 0),
+					r * 0.16, 4, bark.darkened(0.25))
+			# 층을 촘촘히 겹치고 각 층을 조금씩 흔들어야 기하학적으로 안 보인다
+			var lc := Color(0.055, 0.115, 0.090)
+			var layers := 11
 			for i in range(layers):
 				var t := float(i) / float(layers - 1)
-				var y: float = lerp(h * 0.34, h * 0.97, t)
-				var rr: float = lerp(h * 0.20, h * 0.045, t)
-				var hh: float = lerp(h * 0.20, h * 0.10, t)
-				leaf.cone(Transform3D(Basis.IDENTITY, Vector3(0, y, 0)), rr, hh, 7,
-					lc.lightened(t * 0.18))
+				var y: float = lerp(h * 0.28, h * 0.99, t)
+				var rr: float = lerp(h * 0.215, h * 0.030, pow(t, 0.85))
+				var hh: float = lerp(h * 0.185, h * 0.085, t)
+				var jit := Vector3(rng.randf_range(-1.0, 1.0), 0.0,
+					rng.randf_range(-1.0, 1.0)) * rr * 0.14
+				var bs := Basis(Vector3.UP, rng.randf() * TAU)
+				leaf.cone(Transform3D(bs, Vector3(0, y, 0) + jit), rr, hh, 7,
+					_shade(lc, 1.0 + t * 0.55 + rng.randf_range(-0.12, 0.12)))
 		"fir":
-			h = rng.randf_range(13.0, 20.0)
-			r = h * 0.028
-			trunk.cyl(Transform3D.IDENTITY, r, r * 0.3, h, 7, Color(0.26, 0.19, 0.13))
-			var fc := Color(0.08, 0.18, 0.12)
-			for i in range(8):
-				var t := float(i) / 7.0
-				var y: float = lerp(h * 0.20, h * 0.98, t)
-				var rr: float = lerp(h * 0.17, h * 0.03, t)
-				leaf.cone(Transform3D(Basis.IDENTITY, Vector3(0, y, 0)), rr, h * 0.16, 6,
-					fc.lightened(t * 0.22))
+			h = rng.randf_range(14.0, 22.0)
+			r = h * 0.030
+			var fbark := Color(0.205, 0.140, 0.098)
+			trunk.cyl(Transform3D.IDENTITY, r, r * 0.26, h, 7, fbark)
+			var fc := Color(0.045, 0.098, 0.080)
+			for i in range(13):
+				var t := float(i) / 12.0
+				var y: float = lerp(h * 0.18, h * 0.995, t)
+				var rr: float = lerp(h * 0.195, h * 0.022, pow(t, 0.80))
+				var jit := Vector3(rng.randf_range(-1.0, 1.0), 0.0,
+					rng.randf_range(-1.0, 1.0)) * rr * 0.12
+				leaf.cone(Transform3D(Basis(Vector3.UP, rng.randf() * TAU),
+					Vector3(0, y, 0) + jit), rr, h * 0.145, 6,
+					_shade(fc, 1.0 + t * 0.65 + rng.randf_range(-0.10, 0.10)))
 		"birch":
 			h = rng.randf_range(9.0, 14.0)
 			r = h * 0.026
@@ -57,12 +77,12 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				var y := h * (0.15 + 0.15 * float(i))
 				trunk.cyl(Transform3D(Basis.IDENTITY, Vector3(0, y, 0)),
 					r * 1.03, r * 1.0, h * 0.03, 7, Color(0.16, 0.16, 0.15))
-			var bc := Color(0.52, 0.62, 0.22)
+			var bc := Color(0.255, 0.330, 0.140)
 			for i in range(4):
 				var a := rng.randf() * TAU
 				var off := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.4, 1.6)
 				leaf.sphere(Vector3(0, h * 0.82, 0) + off, h * rng.randf_range(0.16, 0.24),
-					7, 5, bc.lightened(rng.randf_range(-0.08, 0.14)), Vector3(1, 0.8, 1))
+					7, 6, _shade(bc, rng.randf_range(0.80, 1.30)), Vector3(1.0, 0.95, 1.0))
 		"oak":
 			h = rng.randf_range(9.0, 13.0)
 			r = h * 0.055
@@ -73,11 +93,11 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 				var from := Vector3(0, h * 0.55, 0)
 				var to := from + Vector3(cos(a), 1.1, sin(a)) * h * 0.28
 				trunk.rod(from, to, r * 0.30, 5, Color(0.30, 0.22, 0.15))
-				leaf.sphere(to + Vector3(0, h * 0.06, 0), h * 0.22, 7, 5,
-					Color(0.24, 0.38, 0.16).lightened(rng.randf_range(0.0, 0.16)),
-					Vector3(1, 0.75, 1))
-			leaf.sphere(Vector3(0, h * 0.82, 0), h * 0.30, 8, 6, Color(0.22, 0.36, 0.15),
-				Vector3(1, 0.72, 1))
+				leaf.sphere(to + Vector3(0, h * 0.06, 0), h * 0.24, 7, 6,
+					_shade(Color(0.100, 0.178, 0.092), rng.randf_range(0.85, 1.45)),
+					Vector3(1.05, 0.90, 1.05))
+			leaf.sphere(Vector3(0, h * 0.82, 0), h * 0.32, 9, 7, Color(0.095, 0.168, 0.086),
+				Vector3(1.08, 0.92, 1.08))
 		"ancient":
 			h = rng.randf_range(12.0, 18.0)
 			r = h * 0.070
@@ -110,18 +130,33 @@ func tree(kind: String, seed_v: int) -> Dictionary:
 			for i in range(5):
 				var t := float(i) / 4.0
 				leaf.sphere(Vector3(0, h * (0.6 + t * 0.35), 0), h * (0.22 - t * 0.10),
-					7, 5, Color(0.34, 0.52, 0.36).lightened(t * 0.2), Vector3(1.3, 0.6, 1.3))
+					7, 5, _shade(Color(0.235, 0.360, 0.250), 1.0 + t * 0.45), Vector3(1.3, 0.6, 1.3))
 		_:  # beech (기본 — 초원)
-			h = rng.randf_range(8.0, 12.0)
-			r = h * 0.038
-			trunk.cyl(Transform3D.IDENTITY, r, r * 0.45, h * 0.7, 7, Color(0.40, 0.29, 0.18))
-			var cc := Color(0.30, 0.46, 0.19)
-			leaf.sphere(Vector3(0, h * 0.80, 0), h * 0.28, 8, 6, cc, Vector3(1.1, 0.82, 1.1))
-			for i in range(3):
-				var a := rng.randf() * TAU
-				leaf.sphere(Vector3(cos(a) * h * 0.16, h * 0.66, sin(a) * h * 0.16),
-					h * 0.19, 7, 5, cc.lightened(rng.randf_range(-0.06, 0.12)),
-					Vector3(1, 0.85, 1))
+			h = rng.randf_range(10.0, 15.0)
+			r = h * 0.040
+			var bbark := Color(0.265, 0.205, 0.145)
+			# 줄기를 높이 올리고 위쪽에서만 갈라진다 — 버섯 모양을 피하는 핵심
+			trunk.cyl(Transform3D.IDENTITY, r, r * 0.38, h * 0.74, 8, bbark)
+			var cc := Color(0.098, 0.170, 0.088)
+			var arms := rng.randi_range(5, 6)
+			for i in range(arms):
+				var a := TAU * float(i) / float(arms) + rng.randf_range(-0.30, 0.30)
+				var reach := h * rng.randf_range(0.14, 0.24)
+				var from := Vector3(0, h * rng.randf_range(0.56, 0.68), 0)
+				var to := from + Vector3(cos(a) * reach, h * rng.randf_range(0.12, 0.24),
+					sin(a) * reach)
+				trunk.rod(from, to, r * 0.30, 5, bbark.darkened(0.12))
+				# 가지마다 작은 잎 덩어리 셋. 크기를 흩어야 덩어리 하나로 안 보인다.
+				for j in range(3):
+					var off := Vector3(rng.randf_range(-1.0, 1.0), rng.randf_range(-0.7, 0.9),
+						rng.randf_range(-1.0, 1.0)) * h * 0.11
+					leaf.sphere(to + off, h * rng.randf_range(0.11, 0.19), 6, 5,
+						_shade(cc, rng.randf_range(0.78, 1.45)), Vector3(1.0, 0.90, 1.0))
+			# 중앙 수관 — 위로 솟은 형태
+			leaf.sphere(Vector3(0, h * 0.86, 0), h * 0.20, 8, 6,
+				_shade(cc, 1.15), Vector3(1.0, 1.00, 1.0))
+			leaf.sphere(Vector3(0, h * 0.74, 0), h * 0.24, 8, 6,
+				_shade(cc, 0.92), Vector3(1.05, 0.95, 1.05))
 
 	var log_mb := MeshBuilder.new()
 	log_mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3.ZERO), r, r * 0.7,
@@ -143,13 +178,13 @@ func stump(r: float, col: Color = Color(0.38, 0.27, 0.17)) -> Mesh:
 	return _cache[k]
 
 # ═══════════════════════════════════════════════════════ 바위 · 광맥
-func boulder(size: float, seed_v: int, col: Color = Color(0.46, 0.46, 0.48)) -> Mesh:
+func boulder(size: float, seed_v: int, col: Color = Color(0.305, 0.290, 0.270)) -> Mesh:
 	var k := _key(["rock", size, seed_v, col.to_html()])
 	if _cache.has(k):
 		return _cache[k]
 	var mb := MeshBuilder.new()
 	mb.rock(Vector3(0, size * 0.55, 0), size, seed_v, col, 8, 5, 0.30,
-		Vector3(1.0, 0.75, 1.0))
+		Vector3(1.0, 0.75, 1.0), Color(0.145, 0.190, 0.085), 0.85)
 	_cache[k] = mb.commit()
 	return _cache[k]
 
@@ -195,17 +230,17 @@ func bush(kind: String, seed_v: int) -> Dictionary:
 	rng.seed = seed_v
 	var leaves := MeshBuilder.new()
 	var fruit := MeshBuilder.new()
-	var lc := Color(0.22, 0.36, 0.18)
+	var lc := Color(0.110, 0.198, 0.108)
 	var fc := Color(0.80, 0.15, 0.25)
 	match kind:
-		"blueberry": fc = Color(0.24, 0.30, 0.72); lc = Color(0.20, 0.33, 0.20)
-		"cloudberry": fc = Color(0.95, 0.72, 0.22); lc = Color(0.26, 0.34, 0.22)
-		"thistle": fc = Color(0.62, 0.36, 0.78); lc = Color(0.22, 0.30, 0.24)
+		"blueberry": fc = Color(0.24, 0.30, 0.72); lc = Color(0.140, 0.215, 0.125)
+		"cloudberry": fc = Color(0.95, 0.72, 0.22); lc = Color(0.190, 0.235, 0.130)
+		"thistle": fc = Color(0.62, 0.36, 0.78); lc = Color(0.150, 0.205, 0.150)
 	for i in range(5):
 		var a := TAU * float(i) / 5.0 + rng.randf() * 0.6
 		var p := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.05, 0.30)
 		leaves.sphere(p + Vector3(0, rng.randf_range(0.20, 0.42), 0),
-			rng.randf_range(0.18, 0.28), 6, 4, lc.lightened(rng.randf_range(0.0, 0.15)),
+			rng.randf_range(0.18, 0.28), 6, 4, _shade(lc, rng.randf_range(0.85, 1.35)),
 			Vector3(1, 0.8, 1))
 	for i in range(7):
 		var a2 := rng.randf() * TAU
@@ -249,22 +284,37 @@ func flower(col: Color, seed_v: int) -> Mesh:
 	_cache[k] = mb.commit()
 	return _cache[k]
 
-func grass_tuft(col: Color, seed_v: int) -> Mesh:
-	var k := _key(["grass", col.to_html(), seed_v])
+## 풀 한 포기. 잎이 바깥으로 활처럼 휘고, 뿌리 쪽이 어둡다.
+## 색은 흑백 그라디언트로만 넣고 실제 색은 멀티메시 인스턴스 컬러가 곱한다
+## (지점마다 지면 색에 맞는 풀색을 쓰기 위해서다).
+func grass_tuft(seed_v: int, blades: int = 6) -> Mesh:
+	var k := _key(["grass2", seed_v, blades])
 	if _cache.has(k):
 		return _cache[k]
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_v
 	var mb := MeshBuilder.new()
-	for i in range(7):
+	for i in range(blades):
 		var a := rng.randf() * TAU
-		var base := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.14)
-		var tip := base + Vector3(rng.randf_range(-0.10, 0.10), rng.randf_range(0.16, 0.32),
-			rng.randf_range(-0.10, 0.10))
-		var w := 0.022
-		var side := Vector3(-sin(a), 0, cos(a)) * w
-		mb.quad(base - side, base + side, tip + side * 0.25, tip - side * 0.25,
-			col.lightened(rng.randf_range(-0.10, 0.16)))
+		var base := Vector3(cos(a), 0, sin(a)) * rng.randf_range(0.0, 0.11)
+		# 잎이 눕는 방향과 정도
+		var la := rng.randf() * TAU
+		var ld := Vector3(cos(la), 0, sin(la))
+		var lean := rng.randf_range(0.25, 0.85)
+		var hgt := rng.randf_range(0.17, 0.32)
+		var w := rng.randf_range(0.015, 0.026)
+		var side := Vector3(-ld.z, 0.0, ld.x) * w
+
+		var p0 := base
+		var p1 := base + Vector3(0, hgt * 0.58, 0) + ld * hgt * 0.12 * lean
+		var p2 := base + Vector3(0, hgt * 0.95, 0) + ld * hgt * 0.46 * lean
+		var shade := rng.randf_range(-0.06, 0.10)
+		var c0 := Color(0.40 + shade, 0.40 + shade, 0.40 + shade)
+		var c1 := Color(0.72 + shade, 0.72 + shade, 0.72 + shade)
+		var c2 := Color(1.0, 1.0, 1.0)
+		mb.quad(p0 - side, p0 + side, p1 + side * 0.72, p1 - side * 0.72, c0.lerp(c1, 0.5))
+		mb.quad(p1 - side * 0.72, p1 + side * 0.72, p2 + side * 0.14, p2 - side * 0.14,
+			c1.lerp(c2, 0.6))
 	_cache[k] = mb.commit()
 	return _cache[k]
 
@@ -308,11 +358,30 @@ func humanoid(cfg: Dictionary) -> Node3D:
 	hips.position = Vector3(0, leg_h, 0)
 	rig.add_child(hips)
 
-	# 몸통
+	# 몸통 — 허리에서 가슴으로 넓어지는 사다리꼴 실루엣.
+	# 상자 하나로는 사람으로 안 보인다. 허리/가슴/어깨/목을 나눠 쌓는다.
 	var tb := MeshBuilder.new()
-	tb.box_up(Vector3.ZERO, Vector3(sh_w * 1.7, torso_h, sh_w * 0.95), cloth)
-	tb.box_up(Vector3(0, torso_h * 0.55, 0), Vector3(sh_w * 2.0, torso_h * 0.42, sh_w * 1.0),
-		cloth.darkened(0.12))
+	tb.box_up(Vector3.ZERO, Vector3(sh_w * 1.42, torso_h * 0.46, sh_w * 0.86), cloth)
+	tb.box_up(Vector3(0, torso_h * 0.40, 0),
+		Vector3(sh_w * 1.74, torso_h * 0.46, sh_w * 0.98), cloth.lightened(0.05))
+	# 허리띠
+	tb.box_up(Vector3(0, torso_h * 0.30, 0),
+		Vector3(sh_w * 1.62, torso_h * 0.10, sh_w * 1.02), Color(0.24, 0.17, 0.11))
+	tb.box(Transform3D(Basis.IDENTITY, Vector3(0, torso_h * 0.35, sh_w * 0.52)),
+		Vector3(sh_w * 0.28, torso_h * 0.12, sh_w * 0.10), Color(0.72, 0.62, 0.32))
+	# 어깨
+	tb.box_up(Vector3(0, torso_h * 0.84, 0),
+		Vector3(sh_w * 2.05, torso_h * 0.20, sh_w * 1.00), cloth.darkened(0.14))
+	for sh_side in [-1.0, 1.0]:
+		tb.box(Transform3D(Basis(Vector3.FORWARD, -0.22 * sh_side),
+			Vector3(sh_w * 0.98 * sh_side, torso_h * 0.94, 0.0)),
+			Vector3(sh_w * 0.62, sh_w * 0.34, sh_w * 1.00), cloth.darkened(0.24))
+	# 목
+	tb.box_up(Vector3(0, torso_h * 0.96, 0),
+		Vector3(sh_w * 0.52, torso_h * 0.10, sh_w * 0.52), skin.darkened(0.10))
+	# 튜닉 자락
+	tb.box_up(Vector3(0, -torso_h * 0.16, 0),
+		Vector3(sh_w * 1.50, torso_h * 0.20, sh_w * 0.94), cloth.darkened(0.08))
 	var torso := MeshInstance3D.new()
 	torso.name = "torso"
 	torso.mesh = tb.commit()

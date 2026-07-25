@@ -107,8 +107,11 @@ func _sph(r: float, phi: float, theta: float) -> Vector3:
 	return Vector3(sin(phi) * cos(theta), cos(phi), sin(phi) * sin(theta)) * r
 
 ## 불규칙한 바위 — 구를 시드 기반으로 찌그러뜨린다
+## moss_amount > 0 이면 윗면 링을 이끼색으로 물들인다.
+## 발헤임의 바위는 거의 항상 위쪽에 이끼가 덮여 있어 이게 있고 없고 차이가 크다.
 func rock(ctr: Vector3, r: float, seed_v: int, col: Color, seg: int = 7, rings: int = 5,
-		jitter: float = 0.34, squash: Vector3 = Vector3(1, 0.8, 1)) -> MeshBuilder:
+		jitter: float = 0.34, squash: Vector3 = Vector3(1, 0.8, 1),
+		moss: Color = Color(0.145, 0.190, 0.085), moss_amount: float = 0.0) -> MeshBuilder:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_v
 	# 링 x 세그먼트 격자를 미리 흔들어 두고 면을 잇는다
@@ -128,12 +131,18 @@ func rock(ctr: Vector3, r: float, seed_v: int, col: Color, seg: int = 7, rings: 
 			var b: Vector3 = grid[j][i2]
 			var c: Vector3 = grid[j + 1][i2]
 			var d: Vector3 = grid[j + 1][i]
+			var fc := col
+			if moss_amount > 0.0:
+				# 위쪽 링일수록 이끼가 짙다. 가장자리는 얼룩덜룩하게.
+				var t := clampf(1.0 - float(j) / (float(rings) * 0.62), 0.0, 1.0)
+				t = clampf(t * moss_amount + rng.randf_range(-0.22, 0.22), 0.0, 1.0)
+				fc = col.lerp(moss, t)
 			if j == 0:
-				tri(a, c, d, col)
+				tri(a, c, d, fc)
 			elif j == rings - 1:
-				tri(a, b, c, col)
+				tri(a, b, c, fc)
 			else:
-				quad(a, b, c, d, col)
+				quad(a, b, c, d, fc)
 	return self
 
 ## 지붕용 쐐기. 바닥 w x d, 높이 h, +X 방향으로 경사.

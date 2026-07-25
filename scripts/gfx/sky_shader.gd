@@ -36,14 +36,17 @@ float star_field(vec3 dir) {
 	return smoothstep(0.0045, 0.0, d) * tw;
 }
 
-// 두 겹으로 흘러가는 구름
+// 세 겹으로 흘러가는 구름. 밀도를 그대로 돌려줘서 두께 음영을 낼 수 있게 한다.
 float clouds(vec3 dir) {
 	if (dir.y < 0.02) return 0.0;
 	vec2 uv = dir.xz / max(dir.y + 0.22, 0.06);
-	float a = texture(cloud_tex, uv * 0.055 + vec2(TIME * cloud_speed, 0.0)).r;
-	float b = texture(cloud_tex, uv * 0.115 - vec2(TIME * cloud_speed * 1.7, TIME * cloud_speed * 0.4)).r;
-	float c = a * 0.65 + b * 0.35;
-	c = smoothstep(0.52 - cloud_amount * 0.34, 0.86, c);
+	float a = texture(cloud_tex, uv * 0.045 + vec2(TIME * cloud_speed, 0.0)).r;
+	float b = texture(cloud_tex, uv * 0.105 - vec2(TIME * cloud_speed * 1.7,
+		TIME * cloud_speed * 0.4)).r;
+	float c2 = texture(cloud_tex, uv * 0.260 + vec2(TIME * cloud_speed * 2.6,
+		-TIME * cloud_speed * 0.9)).r;
+	float c = a * 0.55 + b * 0.30 + c2 * 0.15;
+	c = smoothstep(0.50 - cloud_amount * 0.36, 0.88, c);
 	return c * smoothstep(0.0, 0.24, dir.y);
 }
 
@@ -81,11 +84,21 @@ void sky() {
 		col += sun_color * (disk * 6.0 + glow * 1.1 + wide * 0.22 * (1.0 + dusk_amount));
 	}
 
-	// 구름 — 낮에는 밝게, 노을엔 붉게, 밤엔 어둡게
+	// 구름 — 낮에는 밝게, 노을엔 붉게, 밤엔 어둡게.
+	// 두꺼운 부분은 밑면이 어두워야 뭉게구름처럼 보인다.
 	float cl = clouds(dir);
-	vec3 cloud_col = mix(vec3(0.32, 0.34, 0.40), vec3(1.0, 0.99, 0.96), day_amount);
-	cloud_col = mix(cloud_col, vec3(1.0, 0.62, 0.38), dusk_amount * 0.8);
-	col = mix(col, cloud_col, cl * 0.85);
+	vec3 cloud_lit = mix(vec3(0.36, 0.38, 0.44), vec3(1.0, 0.99, 0.95), day_amount);
+	vec3 cloud_dark = mix(vec3(0.16, 0.17, 0.22), vec3(0.52, 0.55, 0.62), day_amount);
+	cloud_lit = mix(cloud_lit, vec3(1.0, 0.66, 0.40), dusk_amount * 0.85);
+	cloud_dark = mix(cloud_dark, vec3(0.52, 0.26, 0.24), dusk_amount * 0.75);
+	// 태양 쪽 구름은 가장자리가 환하게 탄다
+	float sun_side = 0.0;
+	if (LIGHT0_ENABLED) {
+		sun_side = pow(max(dot(dir, -normalize(LIGHT0_DIRECTION)), 0.0), 3.0);
+	}
+	vec3 cloud_col = mix(cloud_dark, cloud_lit, clamp(cl * 0.75 + sun_side * 0.6, 0.0, 1.0));
+	cloud_col += sun_color * sun_side * cl * 0.35;
+	col = mix(col, cloud_col, cl * 0.90);
 
 	// 지평선 헤이즈 — 먼 거리감을 만든다
 	float haze = pow(1.0 - abs(up), 8.0);

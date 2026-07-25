@@ -83,17 +83,19 @@ static func rules(biome: int) -> Array:
 		_:
 			return []
 
-## 바이옴별 풀 밀도(멀티메시 인스턴스 수) / 색
+## 바이옴별 풀 밀도(멀티메시 인스턴스 수) / 지면색 대비 풀색 배율.
+## 풀색은 그 지점의 지면 색에서 뽑아 쓰므로 여기서는 "지면보다 얼마나
+## 밝고 노란가"만 정한다 — 지면과 풀이 따로 놀지 않는 게 발헤임 룩의 핵심.
 static func grass_of(biome: int) -> Dictionary:
 	match biome:
-		B.MEADOWS: return {"n": 900, "c": Color(0.36, 0.52, 0.20)}
-		B.BLACKFOREST: return {"n": 520, "c": Color(0.20, 0.32, 0.17)}
-		B.SWAMP: return {"n": 340, "c": Color(0.28, 0.28, 0.17)}
-		B.PLAINS: return {"n": 800, "c": Color(0.66, 0.60, 0.26)}
-		B.MISTLANDS: return {"n": 120, "c": Color(0.22, 0.24, 0.22)}
-		B.ASHLANDS: return {"n": 90, "c": Color(0.34, 0.17, 0.13)}
-		B.MOUNTAIN: return {"n": 0, "c": Color(0.8, 0.85, 0.9)}
-		_: return {"n": 0, "c": Color(0.4, 0.5, 0.3)}
+		B.MEADOWS: return {"n": 1100, "m": Color(1.45, 1.62, 1.15), "h": 1.15}
+		B.BLACKFOREST: return {"n": 750, "m": Color(1.35, 1.70, 1.25), "h": 0.95}
+		B.SWAMP: return {"n": 520, "m": Color(1.30, 1.35, 1.05), "h": 1.25}
+		B.PLAINS: return {"n": 1050, "m": Color(1.35, 1.30, 0.95), "h": 1.45}
+		B.MISTLANDS: return {"n": 300, "m": Color(1.25, 1.40, 1.20), "h": 0.85}
+		B.ASHLANDS: return {"n": 220, "m": Color(1.25, 1.05, 0.90), "h": 0.75}
+		B.MOUNTAIN: return {"n": 0, "m": Color.WHITE, "h": 1.0}
+		_: return {"n": 0, "m": Color.WHITE, "h": 1.0}
 
 # ═══════════════════════════════════════════════ 배치
 ## detailed=true 면 상호작용 가능한 노드, false 면 멀티메시 시각물만.
@@ -171,7 +173,7 @@ static func populate(chunk: TerrainChunk, gen: WorldGen, detailed: bool,
 	if not detailed:
 		_build_multimesh(parent, mm_bucket)
 
-	_build_grass(parent, gen, cx, cz, center_b)
+	_build_grass(parent, gen, cx, cz, center_b, detailed)
 
 static func _make_node(rtype: String, rsub: String, sv: int,
 		rng: RandomNumberGenerator) -> ResourceNode:
@@ -230,42 +232,61 @@ static func _visual_meshes(rtype: String, rsub: String, sv: int) -> Array:
 			return [[bb["leaves"], MatLib.foliage(Color.WHITE, 0.0, 0.07)]]
 	return []
 
-static func _build_grass(parent: Node3D, gen: WorldGen, cx: int, cz: int, biome: int) -> void:
+static func _build_grass(parent: Node3D, gen: WorldGen, cx: int, cz: int, biome: int,
+		detailed: bool) -> void:
 	var g := grass_of(biome)
 	var n: int = int(g["n"])
 	if n <= 0:
 		return
-	var col: Color = g["c"]
+	if not detailed:
+		n = int(n * 0.35)      # 먼 청크는 성글게 — 안개에 묻혀 티가 안 난다
+	var mul: Color = g["m"]
+	var hscale: float = float(g["h"])
 	var rng := gen.chunk_rng(cx, cz, 991)
 	var ox := float(cx) * Const.CHUNK_SIZE
 	var oz := float(cz) * Const.CHUNK_SIZE
 
 	var xfs: Array[Transform3D] = []
+	var cols: Array[Color] = []
 	for i in range(n):
 		var px := ox + rng.randf() * Const.CHUNK_SIZE
 		var pz := oz + rng.randf() * Const.CHUNK_SIZE
 		var h := gen.height(px, pz)
 		if h < Const.WATER_LEVEL + 0.3:
 			continue
-		if gen.biome_from(px, pz, h) != biome:
+		var b := gen.biome_from(px, pz, h)
+		if b != biome:
 			continue
-		if gen.slope_at(px, pz) > 0.5:
+		# 가파른 곳엔 풀이 붙지 않는다 (암반이 드러나야 한다)
+		if gen.slope_at(px, pz) > 0.42:
 			continue
-		var s := rng.randf_range(0.7, 1.5)
+		var s := rng.randf_range(0.70, 1.20)
 		xfs.append(Transform3D(Basis(Vector3.UP, rng.randf() * TAU)
-			.scaled(Vector3(s, s * rng.randf_range(0.8, 1.4), s)),
-			Vector3(px - ox, h - 0.05, pz - oz)))
+			.scaled(Vector3(s, s * hscale * rng.randf_range(0.80, 1.30), s)),
+			Vector3(px - ox, h - 0.06, pz - oz)))
+		# 그 지점 지면 색에서 풀색을 뽑는다
+		var gc := gen.ground_color(px, pz, h, b)
+		var v := rng.randf_range(0.86, 1.14)
+		cols.append(Color(
+			clampf(gc.r * mul.r * v, 0.0, 1.0),
+			clampf(gc.g * mul.g * v, 0.0, 1.0),
+			clampf(gc.b * mul.b * v, 0.0, 1.0), 1.0))
 	if xfs.is_empty():
 		return
+
+	# 포기 모양을 몇 종류 섞어야 반복 티가 안 난다
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.mesh = MeshFactory.grass_tuft(col, cx * 7919 + cz)
+	mm.use_colors = true
+	mm.mesh = MeshFactory.grass_tuft(cx * 7919 + cz * 131, 6 if detailed else 4)
 	mm.instance_count = xfs.size()
 	for i in xfs.size():
 		mm.set_instance_transform(i, xfs[i])
+		mm.set_instance_color(i, cols[i])
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "grass"
 	mmi.multimesh = mm
-	mmi.material_override = MatLib.foliage(Color.WHITE, 0.0, 0.16)
+	# 먼 풀은 셰이더에서 납작하게 눌러 컬링 경계가 드러나지 않게 한다
+	mmi.material_override = MatLib.foliage(Color.WHITE, 0.0, 0.20, 34.0, 62.0)
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(mmi)
