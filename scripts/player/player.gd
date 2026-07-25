@@ -18,7 +18,7 @@ const PICKUP_RANGE := 2.1
 
 var inventory: Inventory
 var stats: PlayerStats
-var anim: RigAnimator
+var anim  # RigAnimator(코드 리그) 또는 GlbRig(GLB 리그) — 같은 인터페이스
 
 var rig: Node3D
 var yaw_pivot: Node3D
@@ -83,15 +83,23 @@ func _ready() -> void:
 	stats = PlayerStats.new()
 	stats.died.connect(_on_died)
 
-	# 스켈레탈 리그 — 팔꿈치/무릎이 실제로 접힌다
-	rig = MeshFactory.humanoid_skeletal({
-		"skin": Color(0.80, 0.64, 0.52), "cloth": Color(0.45, 0.36, 0.26),
-		"hair": Color(0.48, 0.32, 0.16), "height": 1.8, "beard": true,
-	})
-	add_child(rig)
-	anim = RigAnimator.new(rig)
-	hand_r = rig.get_node_or_null("skel/hand_r")
-	hand_l = rig.get_node_or_null("skel/hand_l")
+	# 실제 리깅 모델(KayKit CC0 Barbarian)이 있으면 그것을 쓰고,
+	# 없으면 코드 생성 스켈레탈 리그(팔꿈치/무릎이 실제로 접힌다)로 대체한다
+	rig = GlbRig.create()
+	if rig != null:
+		add_child(rig)
+		anim = rig
+		hand_r = rig.hand_r
+		hand_l = rig.hand_l
+	else:
+		rig = MeshFactory.humanoid_skeletal({
+			"skin": Color(0.80, 0.64, 0.52), "cloth": Color(0.45, 0.36, 0.26),
+			"hair": Color(0.48, 0.32, 0.16), "height": 1.8, "beard": true,
+		})
+		add_child(rig)
+		anim = RigAnimator.new(rig)
+		hand_r = rig.get_node_or_null("skel/hand_r")
+		hand_l = rig.get_node_or_null("skel/hand_l")
 
 	# 카메라 리그
 	yaw_pivot = Node3D.new()

@@ -17,8 +17,10 @@
 - 등장 이름은 북유럽 신화에서 따왔거나 자체 창작한 것입니다.
 - 상업적 목적이 없으며, 학습·연구용으로 공개합니다.
 
-**핵심 기술적 특징: 이 저장소에는 3D 모델 파일도, 오디오 파일도 없습니다.**
-나무·바위·몬스터·보스·건축물·아이템 아이콘·지형·효과음까지 전부 실행 시점에 GDScript 로 생성합니다.
+**핵심 기술적 특징: 오디오 파일이 없고, 주인공을 제외한 3D 모델은 전부 코드로 만듭니다.**
+나무·바위·몬스터·보스·건축물·아이템 아이콘·지형·효과음은 실행 시점에 GDScript 로 생성합니다.
+주인공만 KayKit CC0 리깅 모델(GLB)을 씁니다 — 걷기/달리기/공격/방어/회피/사망 등
+게임 상태가 76종 애니메이션 클립에 매핑됩니다. 파일이 없으면 기존 코드 리그로 대체합니다.
 지면·소재 텍스처 11종(잔디·흙·바위·눈·모래·나무껍질·판자·석조·직물·금속·잿불)만
 [ambientCG](https://ambientcg.com/) 의 CC0 실측 소스를 128px 근백색 그레이스케일로 가공해
 `assets/textures/` 에 넣고 씁니다. 지형 셰이더는 텍스처 명암 구배로 노멀을 꺾는
@@ -257,6 +259,7 @@ scripts/
 ## 라이선스
 
 - 코드: [MIT](LICENSE)
+- 주인공 모델: [KayKit Adventurers — Barbarian](https://github.com/KayKit-Game-Assets/KayKit-Character-Pack-Adventures-1.0) (Kay Lousberg) — CC0. 리깅+애니메이션 76종 GLB, `assets/models/`
 - 텍스처: [ambientCG](https://ambientcg.com/) — CC0 (Grass001, Ground103, Rock058, Snow010A, Ground093C, Bark012, Planks030A, Bricks097, Fabric061, Metal055A, Gravel024)
 - 폰트: 나눔글꼴 (SIL Open Font License 1.1) — `assets/fonts/`
 - Valheim 은 Iron Gate AB 의 상표입니다. 이 프로젝트는 비공식 팬 오마주이며 어떠한 제휴 관계도 없습니다.
