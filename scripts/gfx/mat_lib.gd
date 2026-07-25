@@ -90,54 +90,79 @@ const WATER_SHADER := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert, specular_schlick_ggx;
 
-uniform vec4 shallow : source_color = vec4(0.18, 0.42, 0.45, 1.0);
-uniform vec4 deep : source_color = vec4(0.03, 0.10, 0.18, 1.0);
-uniform float wave_h = 0.28;
+uniform vec4 shallow : source_color = vec4(0.16, 0.40, 0.42, 1.0);
+uniform vec4 deep : source_color = vec4(0.02, 0.08, 0.16, 1.0);
+uniform vec3 sun_dir = vec3(0.0, -1.0, 0.0);
+uniform vec3 sun_col : source_color = vec3(1.0, 0.94, 0.82);
+uniform float wave_h = 0.30;
 uniform float wave_speed = 0.55;
+uniform float choppy = 1.0;              // 날씨에 따른 파고
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D depth_tex : hint_depth_texture, filter_linear_mipmap;
 
 varying vec3 v_world;
 varying float v_wave;
 
+// 서로 다른 방향의 사인파를 겹쳐 자연스러운 너울을 만든다
 float wv(vec2 p, float t) {
-	return sin(p.x * 0.16 + t) * 0.5
+	return sin(p.x * 0.16 + t) * 0.50
 		 + sin(p.y * 0.21 - t * 1.3) * 0.35
-		 + sin((p.x + p.y) * 0.09 + t * 0.7) * 0.4;
+		 + sin((p.x + p.y) * 0.09 + t * 0.7) * 0.40
+		 + sin((p.x - p.y) * 0.33 - t * 1.9) * 0.16
+		 + sin(p.x * 0.71 + t * 2.4) * 0.07;
 }
 
 void vertex() {
 	vec3 wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	float t = TIME * wave_speed;
 	float w = wv(wp.xz, t);
-	VERTEX.y += w * wave_h;
+	VERTEX.y += w * wave_h * choppy;
 	v_wave = w;
 	v_world = wp;
-	// 파도 기울기로 법선 근사
-	float e = 1.5;
+	float e = 1.2;
 	float hx = wv(wp.xz + vec2(e, 0.0), t) - w;
 	float hz = wv(wp.xz + vec2(0.0, e), t) - w;
-	NORMAL = normalize(vec3(-hx * wave_h, 1.0, -hz * wave_h));
+	NORMAL = normalize(vec3(-hx * wave_h * choppy, e * 0.55, -hz * wave_h * choppy));
 }
 
 void fragment() {
+	// 화면 깊이로 수심을 구해 색과 거품을 결정한다
 	float depth_raw = texture(depth_tex, SCREEN_UV).r;
 	vec4 upos = INV_PROJECTION_MATRIX * vec4(SCREEN_UV * 2.0 - 1.0, depth_raw, 1.0);
 	float scene_z = -(upos.z / upos.w);
 	float water_z = -VERTEX.z;
-	float d = clamp((scene_z - water_z) / 12.0, 0.0, 1.0);
+	float dist = max(scene_z - water_z, 0.0);
+	float d = clamp(dist / 14.0, 0.0, 1.0);
 
 	vec3 col = mix(shallow.rgb, deep.rgb, d);
-	vec3 behind = texture(screen_tex, SCREEN_UV).rgb;
-	ALBEDO = mix(behind * mix(vec3(0.85, 0.95, 0.95), deep.rgb, d * 0.9), col, clamp(d * 1.3 + 0.25, 0.0, 1.0));
 
-	// 물마루의 흰 거품
-	float foam = smoothstep(0.75, 1.15, v_wave) * 0.5 + (1.0 - smoothstep(0.0, 0.12, d)) * 0.45;
-	ALBEDO = mix(ALBEDO, vec3(0.92, 0.96, 0.98), clamp(foam, 0.0, 0.7));
+	// 얕은 곳은 바닥이 비쳐 보인다(간이 굴절)
+	vec2 refr = NORMAL.xz * 0.022 * (1.0 - d);
+	vec3 behind = texture(screen_tex, SCREEN_UV + refr).rgb;
+	float clarity = 1.0 - clamp(dist / 5.0, 0.0, 1.0);
+	col = mix(col, behind * mix(vec3(0.75, 0.92, 0.90), vec3(1.0), clarity), clarity * 0.7);
 
-	ROUGHNESS = 0.06;
+	// 해안선 거품 + 물마루 거품
+	float shore = 1.0 - smoothstep(0.0, 1.6, dist);
+	float crest = smoothstep(0.85, 1.25, v_wave);
+	float foam = clamp(shore * 0.85 + crest * 0.45, 0.0, 0.9);
+	col = mix(col, vec3(0.93, 0.97, 0.99), foam);
+
+	// 태양 반사광 — 수면에 길게 늘어지는 윤슬
+	vec3 vdir = normalize(VERTEX);
+	vec3 n = normalize(NORMAL);
+	vec3 sd = normalize(-(VIEW_MATRIX * vec4(normalize(sun_dir), 0.0)).xyz);
+	float spec = pow(max(dot(reflect(-sd, n), -vdir), 0.0), 220.0);
+	col += sun_col * spec * 1.8;
+
+	// 프레넬 — 비스듬히 볼수록 하늘을 반사한다
+	float fres = pow(1.0 - clamp(dot(n, -vdir), 0.0, 1.0), 4.0);
+	col = mix(col, mix(shallow.rgb, vec3(0.72, 0.82, 0.92), 0.65), fres * 0.55);
+
+	ALBEDO = col;
+	ROUGHNESS = mix(0.02, 0.14, foam);
 	METALLIC = 0.0;
-	SPECULAR = 0.65;
+	SPECULAR = 0.6;
 	ALPHA = 1.0;
 }
 """
@@ -156,7 +181,7 @@ void fragment() {
 func _ready() -> void:
 	noise_tex = _make_noise(64, 3.0, 0.55, 1.0)
 	# 그레인은 색을 어둡게 하지 않도록 0.8~1.0 범위로 만든다
-	grain_tex = _make_noise(32, 6.0, 0.70, 1.0, 0.80)
+	grain_tex = _make_noise(24, 5.0, 0.85, 1.0, 0.78)
 	_make_terrain_mat()
 	_make_water_mat()
 
@@ -192,7 +217,7 @@ func _make_terrain_mat() -> void:
 	terrain_mat.shader = sh
 	terrain_mat.set_shader_parameter("detail", noise_tex)
 	terrain_mat.set_shader_parameter("detail_scale", 0.30)
-	terrain_mat.set_shader_parameter("detail_power", 0.32)
+	terrain_mat.set_shader_parameter("detail_power", 0.42)
 
 func _make_water_mat() -> void:
 	var sh := Shader.new()

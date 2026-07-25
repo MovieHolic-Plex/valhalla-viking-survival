@@ -136,6 +136,9 @@ func _snap(d: Dictionary, pos: Vector3, normal: Vector3) -> Transform3D:
 			p.x = snappedf(pos.x, GRID * 0.5)
 			p.z = snappedf(pos.z, GRID * 0.5)
 			p.y = snappedf(pos.y, GRID * 0.5) + size.y * 0.5
+		"boat":
+			# 배는 자유 배치 + 수면에 띄운다
+			p.y = Const.WATER_LEVEL
 		_:
 			# 가구·시설물은 지면에 자유 배치
 			p.x = snappedf(pos.x, FREE_SNAP)
@@ -159,8 +162,13 @@ func _check_valid(d: Dictionary, xf: Transform3D) -> bool:
 		var size: Vector3 = d.get("size", Vector3.ONE)
 		if absf(xf.origin.y - size.y * 0.5 - gh) > 0.8:
 			return false
-	# 물 위 금지
-	if xf.origin.y < Const.WATER_LEVEL - 0.5:
+	if bool(d.get("water", false)):
+		# 배는 반대로 충분히 깊은 물 위여야 한다
+		var gh2 := GameState.height_at(xf.origin.x, xf.origin.z)
+		if Const.WATER_LEVEL - gh2 < 1.4:
+			return false
+	elif xf.origin.y < Const.WATER_LEVEL - 0.5:
+		# 그 외 건축물은 물속에 지을 수 없다
 		return false
 	# 겹침 검사
 	var space := get_world_3d().direct_space_state
@@ -192,6 +200,17 @@ func try_place() -> bool:
 	var d := RecipeDB.piece(current_id)
 	if not player.inventory.consume(d.get("mats", {})):
 		return false
+	# 배는 건축 조각이 아니라 탈것으로 만든다
+	if d.has("boat"):
+		var boat := Boat.make(str(d["boat"]))
+		get_tree().current_scene.add_child(boat)
+		boat.global_position = Vector3(_place_xf.origin.x, Const.WATER_LEVEL,
+			_place_xf.origin.z)
+		boat.rotation.y = rot_step
+		GameState.stats["built"] = int(GameState.stats["built"]) + 1
+		Sfx.play_at("build", boat.global_position, get_tree().current_scene, -2.0)
+		return true
+
 	var piece := BuildPiece.make(current_id)
 	get_tree().current_scene.add_child(piece)
 	piece.global_transform = _place_xf

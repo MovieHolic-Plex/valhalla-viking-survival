@@ -71,6 +71,8 @@ static func _build() -> void:
 			"height": 0.85, "girth": 0.55, "head": 0.30, "horn": "tusk", "tail": 0.25},
 		"drops": {"boar_meat": [1, 2, 1.0], "leather_scraps": [1, 3, 0.8]},
 		"trophy": ["trophy_boar", 0.10],
+		"tame": {"food": ["raspberries", "blueberries", "carrot", "turnip", "mushroom"],
+			"needed": 3, "baby": "boar"},
 	})
 	_e("deer", {
 		"biomes": [B.MEADOWS, B.BLACKFOREST], "tier": 0, "hp": 30.0, "dmg": {D.BLUNT: 6.0},
@@ -208,6 +210,8 @@ static func _build() -> void:
 		"drops": {"wolf_meat": [1, 2, 0.9], "wolf_pelt": [1, 2, 0.9],
 			"wolf_fang": [0, 1, 0.4], "bone_fragments": [1, 2, 0.6]},
 		"trophy": ["trophy_wolf", 0.10],
+		"tame": {"food": ["boar_meat", "deer_meat", "cooked_boar_meat",
+			"cooked_deer_meat", "neck_tail"], "needed": 5, "baby": "wolf"},
 	})
 	_e("fenring", {
 		"biomes": [B.MOUNTAIN], "tier": 4, "hp": 220.0, "dmg": {D.SLASH: 65.0},
@@ -287,6 +291,7 @@ static func _build() -> void:
 			"height": 2.2, "girth": 1.4, "head": 0.75, "horn": "tusk", "tail": 0.4},
 		"drops": {"lox_meat": [2, 4, 1.0], "lox_pelt": [2, 4, 0.9]},
 		"trophy": ["trophy_lox", 0.10],
+		"tame": {"food": ["barley", "cloudberry", "flax"], "needed": 6, "baby": "lox"},
 	})
 
 	# ═══════════ 미스트랜드 ═══════════

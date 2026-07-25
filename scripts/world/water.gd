@@ -26,6 +26,9 @@ func _process(_delta: float) -> void:
 	var p := GameState.player
 	if p == null or not is_instance_valid(p):
 		return
+	visible = not p.has_meta("in_dungeon")
+	if not visible:
+		return
 	# 격자 단위로 스냅 이동 — 파도 위상이 흔들리지 않는다
 	var pos := p.global_position
 	global_position = Vector3(

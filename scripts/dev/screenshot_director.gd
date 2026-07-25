@@ -8,6 +8,7 @@ var _n := 0
 
 var keep_alive := true
 var ui_only := false
+var new_only := false
 
 func _ready() -> void:
 	DirAccess.make_dir_recursive_absolute(out_dir)
@@ -202,6 +203,11 @@ func _run() -> void:
 	if ui_only:
 		await _ui_sequence(m, p)
 		print("[SHOT] === UI 확인 완료 ===")
+		get_tree().quit()
+		return
+	if new_only:
+		await _new_systems(m, p)
+		print("[SHOT] === 신규 시스템 확인 완료 ===")
 		get_tree().quit()
 		return
 
@@ -404,6 +410,8 @@ func _run() -> void:
 	if is_instance_valid(b3):
 		b3.queue_free()
 
+	await _new_systems(m, p)
+
 	# 26 해안 · 바다
 	await _clear_enemies()
 	await _weather("clear")
@@ -463,6 +471,186 @@ func _ui_sequence(m, p) -> void:
 	print("[TEST] ", "PASS" if (ok_save and ok_load and after_wood == before_wood \
 		and p.global_position.distance_to(before_pos) < 1.0) else "FAIL")
 	SaveSystem.delete_save("selftest")
+
+## 신규 시스템 전용 촬영 (지형변형·낚시·항해·길들이기·마법·던전)
+func _new_systems(m, p) -> void:
+	await _clear_enemies()
+	await _weather("clear")
+	await _time(0.40)
+
+	# 지형 변형 (괭이)
+	var thome := _find(Const.Biome.MEADOWS) + Vector3(-18, 0, 14)
+	await _goto(thome, 0.8, -0.22, 7.0)
+	p.inventory.add_item("hoe", 1)
+	for i in range(p.inventory.size()):
+		var sh: Dictionary = p.inventory.get_slot(i)
+		if not sh.is_empty() and str(sh["id"]) == "hoe":
+			p.inventory.toggle_equip(i)
+			break
+	# 계단식 단을 만들어 보여준다
+	var gen := GameState.gen
+	var keys: Array = []
+	for i in range(5):
+		var c: Vector3 = p.global_position + Vector3(0, 0, -3.0 - float(i) * 2.6)
+		c.y = GameState.height_at(c.x, c.z) + float(i) * 0.7
+		keys += gen.modify(c, 2.4, "level", 0.0)
+	for i in range(3):
+		var c2: Vector3 = p.global_position + Vector3(5.0 + float(i) * 2.0, 0, -4.0)
+		c2.y = GameState.height_at(c2.x, c2.z)
+		keys += gen.modify(c2, 2.0, "dig", 1.6)
+	m.chunks.rebuild(keys)
+	await _wait(20)
+	# 만든 계단식 단이 한눈에 보이도록 뒤로 물러나 내려다본다
+	var view := thome + Vector3(9.0, 0, 9.0)
+	await _goto(view, PI * 0.25, -0.40, 11.0)
+	await _wait(20)
+	await _shot("terrain_hoe")
+
+	# 낚시
+	await _clear_enemies()
+	var coast := _coast()
+	await _goto(coast, 0.0, -0.05, 5.0)
+	p.inventory.add_item("fishing_rod", 1)
+	p.inventory.add_item("fishing_bait", 20)
+	for i in range(p.inventory.size()):
+		var sf: Dictionary = p.inventory.get_slot(i)
+		if not sf.is_empty() and str(sf["id"]) == "fishing_rod":
+			p.inventory.toggle_equip(i)
+			break
+	# 바다 쪽을 향하게 회전
+	var sea_dir := (Vector3(0, 0, 0) - coast).normalized()
+	p.yaw = atan2(-sea_dir.x, -sea_dir.z) + PI
+	await _wait(6)
+	p._cast_charge = 0.9
+	p._throw_bobber()
+	await _wait(60)
+	await _shot("fishing")
+	if p._bobber != null and is_instance_valid(p._bobber):
+		p._bobber.queue_free()
+
+	# 배 · 항해
+	var boat := Boat.make("longship")
+	m.add_child(boat)
+	var bpos := coast
+	# 물 쪽으로 조금 밀어 띄운다
+	for i in range(40):
+		var t := bpos + sea_dir * 4.0
+		if GameState.height_at(t.x, t.z) < Const.WATER_LEVEL - 2.5:
+			bpos = t
+			break
+		bpos = t
+	boat.global_position = Vector3(bpos.x, Const.WATER_LEVEL, bpos.z)
+	boat.rotation.y = atan2(sea_dir.x, sea_dir.z)
+	await _wait(20)
+	boat._mount(p)
+	boat.speed_step = 3
+	p.yaw = boat.rotation.y + PI
+	p.pitch = -0.08
+	p.zoom = 12.0
+	p.spring.spring_length = 12.0
+	await _wait(90)
+	await _shot("sailing")
+	boat._dismount()
+	await _goto(coast, 0.0, -0.05, 6.0)
+
+	# 길들이기
+	await _clear_enemies()
+	await _goto(_find(Const.Biome.MEADOWS), 1.0, -0.10, 6.0)
+	for i in range(3):
+		var a := TAU * float(i) / 3.0
+		var bp: Vector3 = p.global_position + Vector3(cos(a), 0, sin(a)) * 4.5
+		bp.y = GameState.height_at(bp.x, bp.z) + 0.4
+		var boar := Enemy.spawn("boar", m, bp)
+		if boar:
+			boar.tame_progress = 2
+			boar._become_tamed(false)
+			boar._refresh_tag()
+	await _wait(40)
+	await _shot("taming")
+
+	# 마법 시전
+	await _clear_enemies()
+	p.inventory.add_item("eitr_bread", 5)
+	p.inventory.add_item("staff_fire", 1)
+	# 음식 슬롯이 3칸뿐이라 마법 음식을 넣으려면 자리를 비워야 한다
+	p.stats.foods.clear()
+	p.stats.eat("eitr_bread")
+	p.stats.eat("cooked_deer_meat")
+	p.stats.eat("queens_jam")
+	p.stats.max_eitr = p.stats.max_eitr_value()
+	p.stats.eitr = p.stats.max_eitr
+	for i in range(p.inventory.size()):
+		var ss: Dictionary = p.inventory.get_slot(i)
+		if not ss.is_empty() and str(ss["id"]) == "staff_fire":
+			p.inventory.toggle_equip(i)
+			break
+	await _spawn("greydwarf", 3, 9.0)
+	await _wait(10)
+	for i in range(3):
+		p.stats.max_eitr = p.stats.max_eitr_value()
+		p.stats.eitr = p.stats.max_eitr
+		p._attack_cd = 0.0
+		p._cast_staff("staff_fire", ItemDB.get_item("staff_fire"))
+		await _wait(5)
+	await _shot("magic_staff")
+
+	# 던전 내부
+	await _clear_enemies()
+	var dent := DungeonEntrance.make("crypt", 4242, 99)
+	m.add_child(dent)
+	var dpos := _find(Const.Biome.MEADOWS) + Vector3(8, 0, -8)
+	dpos.y = GameState.height_at(dpos.x, dpos.z)
+	dent.global_position = dpos
+	await _goto(dpos + Vector3(0, 0, 7.0), PI, -0.02, 7.0)
+	await _shot("dungeon_entrance")
+	dent.interact(p)
+	await _wait(40)
+	# 복도가 길게 보이는 방향을 찾아 그쪽을 바라본다
+	var dgn = null
+	for ch in m.get_children():
+		if ch is Dungeon:
+			dgn = ch
+	if dgn != null:
+		var best_dir := 0.0
+		var best_len := -1
+		var dirs := {0.0: Vector2i(0, 1), PI: Vector2i(0, -1),
+			PI * 0.5: Vector2i(-1, 0), -PI * 0.5: Vector2i(1, 0)}
+		for ang in dirs:
+			var step: Vector2i = dirs[ang]
+			var n := 0
+			var c := Vector2i.ZERO
+			while dgn.cells.has(c + step) and n < 9:
+				c += step
+				n += 1
+			if n > best_len:
+				best_len = n
+				best_dir = ang
+		p.yaw = best_dir
+		p.global_position = dgn.origin + Vector3(0, 1.0, 0)
+	await _wait(30)
+	var dg = null
+	for ch in m.get_children():
+		if ch is Dungeon:
+			dg = ch
+			break
+	if dg != null:
+		var geo := dg.get_node_or_null("geo") as MeshInstance3D
+		print("[DUNGEON] origin=", dg.origin, " cells=", dg.cells.size(),
+			" generated=", dg.generated,
+			" geo=", (geo.get_aabb() if geo else "none"),
+			" player=", p.global_position, " onfloor=", p.is_on_floor(),
+			" children=", dg.get_child_count())
+	else:
+		print("[DUNGEON] not found")
+	p.zoom = 3.2
+	p.spring.spring_length = 3.2
+	p.pitch = -0.05
+	await _wait(25)
+	await _shot("dungeon_inside")
+	# 나오기
+	p.remove_meta("in_dungeon")
+	await _goto(_find(Const.Biome.MEADOWS), 0.6, -0.10, 5.0)
+
 
 func _coast() -> Vector3:
 	var gen := GameState.gen

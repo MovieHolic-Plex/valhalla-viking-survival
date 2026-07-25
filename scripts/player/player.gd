@@ -59,6 +59,10 @@ var _build_system = null
 var input_locked := false
 var _cam_shake := 0.0
 var _sit := false
+var terrain_mode := 0            # 0 평탄화 · 1 융기 · 2 굴착
+var _bobber: Bobber = null
+var _cast_charge := 0.0
+const TERRAIN_MODE_KEY := ["MSG_HOE_LEVEL", "MSG_HOE_RAISE", "MSG_HOE_DIG"]
 
 func _ready() -> void:
 	add_to_group("player")
@@ -140,6 +144,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		_do_dodge()
 	elif event.is_action_pressed("sit"):
 		_sit = not _sit
+	elif event.is_action_pressed("rotate_piece"):
+		var rid := inventory.equipped_id(Inventory.SLOT_RIGHT)
+		if ItemDB.get_item(rid).get("use", "") == "terrain":
+			terrain_mode = (terrain_mode + 1) % 3
+			GameState.msg(tr(TERRAIN_MODE_KEY[terrain_mode]))
+			Sfx.play("click", -16.0)
 
 func _physics_process(delta: float) -> void:
 	if stats.is_dead:
@@ -187,6 +197,15 @@ func _update_timers(delta: float) -> void:
 
 # ═══════════════════════════════════════════════ 이동
 func _move(delta: float) -> float:
+	# 배에 타고 있으면 조종은 배가 맡는다
+	if has_meta("boat"):
+		var b = get_meta("boat")
+		if b != null and is_instance_valid(b):
+			velocity = Vector3.ZERO
+			is_swimming = false
+			return 0.0
+		remove_meta("boat")
+
 	var input := Vector2.ZERO
 	if not input_locked:
 		input.x = Input.get_axis("move_left", "move_right")
@@ -201,7 +220,9 @@ func _move(delta: float) -> float:
 	if wish.length() > 0.001:
 		wish = wish.normalized()
 
-	var depth := Const.WATER_LEVEL - global_position.y
+	# 던전은 해수면보다 훨씬 아래 좌표에 있으므로 물 판정에서 제외한다
+	var in_dungeon := has_meta("in_dungeon")
+	var depth := -100.0 if in_dungeon else Const.WATER_LEVEL - global_position.y
 	is_swimming = depth > 1.25
 
 	var target_speed := WALK
@@ -324,6 +345,13 @@ func shake(amount: float) -> void:
 
 # ═══════════════════════════════════════════════ 환경
 func _update_environment(delta: float) -> void:
+	# 던전 안에서는 날씨·바이옴 판정을 멈춘다
+	if has_meta("in_dungeon"):
+		stats.remove_status("freezing")
+		stats.remove_status("wet")
+		_update_comfort(delta)
+		return
+
 	_biome_check -= delta
 	if _biome_check <= 0.0:
 		_biome_check = 0.5
@@ -409,6 +437,16 @@ func _update_combat(delta: float) -> void:
 		_block_time = 0.35     # 패링 윈도
 	is_blocking = want_block
 
+	# ── 낚시 ──
+	if bool(item.get("fishing", false)):
+		_update_fishing(delta)
+		return
+	# ── 지팡이 (에이트르 시전) ──
+	if item.has("staff"):
+		if Input.is_action_just_pressed("attack") and _attack_cd <= 0.0:
+			_cast_staff(right, item)
+		return
+
 	if is_bow:
 		if Input.is_action_pressed("attack") and _has_ammo():
 			if not _bow_drawing:
@@ -422,7 +460,10 @@ func _update_combat(delta: float) -> void:
 			_release_arrow(right, item)
 	else:
 		if Input.is_action_just_pressed("attack") and _attack_cd <= 0.0 and not _sit:
-			_start_melee(right, item)
+			if str(item.get("use", "")) == "terrain":
+				_use_terrain_tool()
+			else:
+				_start_melee(right, item)
 
 func _start_melee(id: String, item: Dictionary) -> void:
 	var spd := float(item.get("spd", 1.1)) if not item.is_empty() else 1.4
@@ -512,6 +553,145 @@ func _resolve_melee() -> void:
 	if any:
 		stats.raise_skill(skill, 0.7)
 		shake(0.35)
+	elif item.has("mine_tier"):
+		# 바위를 맞히지 못한 곡괭이질은 땅을 판다
+		_dig_terrain()
+
+# ─────────────────────────────────────────── 지형 변형
+func _terrain_aim(max_dist: float) -> Dictionary:
+	var from := cam.global_position
+	var to := from + -cam.global_transform.basis.z * (max_dist + spring.spring_length)
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.collision_mask = Const.L_WORLD
+	q.exclude = [get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	if hit.is_empty():
+		return {}
+	if hit["position"].distance_to(global_position) > max_dist:
+		return {}
+	return hit
+
+func _apply_terrain(center: Vector3, radius: float, mode: String,
+		amount: float, cost: float) -> void:
+	if GameState.gen == null:
+		return
+	if not stats.use_stamina(cost):
+		Sfx.play("error", -14.0)
+		return
+	var keys := GameState.gen.modify(center, radius, mode, amount)
+	var cm = get_tree().current_scene.get_node_or_null("chunks")
+	if cm != null:
+		cm.rebuild(keys)
+	Sfx.play_at("build", center, get_tree().current_scene, -6.0, 0.8)
+	Fx.burst(get_tree().current_scene, center + Vector3(0, 0.3, 0),
+		Color(0.52, 0.42, 0.28), 14, 3.0, 0.08, 0.8)
+	anim.attack("chop")
+	_attack_cd = 0.7
+
+func _use_terrain_tool() -> void:
+	var hit := _terrain_aim(6.0)
+	if hit.is_empty():
+		return
+	var p: Vector3 = hit["position"]
+	match terrain_mode:
+		0:
+			# 평탄화 기준 높이는 플레이어 발밑
+			_apply_terrain(Vector3(p.x, global_position.y, p.z), 2.6, "level", 0.0, 12.0)
+		1:
+			_apply_terrain(p, 2.2, "raise", 0.55, 14.0)
+		2:
+			_apply_terrain(p, 2.2, "dig", 0.55, 14.0)
+
+func _dig_terrain() -> void:
+	var hit := _terrain_aim(4.0)
+	if hit.is_empty():
+		return
+	var p: Vector3 = hit["position"]
+	_apply_terrain(p, 1.8, "dig", 0.6, 10.0)
+	# 파낸 흙에서 돌이 조금 나온다
+	if randf() < 0.35:
+		ItemDrop.spawn(get_tree().current_scene, p + Vector3(0, 0.5, 0), "stone",
+			randi_range(1, 2))
+
+# ─────────────────────────────────────────── 낚시
+func _update_fishing(delta: float) -> void:
+	if _bobber != null and is_instance_valid(_bobber):
+		if Input.is_action_just_pressed("attack"):
+			_bobber.try_hook()
+		if Input.is_action_just_pressed("block"):
+			_bobber.queue_free()
+			_bobber = null
+		return
+	if Input.is_action_pressed("attack"):
+		_cast_charge = minf(_cast_charge + delta * 1.4, 1.0)
+		anim.attack("bow")
+	elif _cast_charge > 0.08:
+		_throw_bobber()
+		_cast_charge = 0.0
+
+func _throw_bobber() -> void:
+	if inventory.count("fishing_bait") <= 0:
+		GameState.msg(tr("MSG_NO_BAIT"))
+		Sfx.play("error", -12.0)
+		return
+	inventory.remove_item("fishing_bait", 1)
+	var dir := -cam.global_transform.basis.z.normalized()
+	dir.y += 0.28
+	var b := Bobber.new()
+	get_tree().current_scene.add_child(b)
+	b.launch(global_position + Vector3(0, 1.5, 0) + dir * 1.2,
+		dir.normalized() * lerpf(10.0, 26.0, _cast_charge), self)
+	b.finished.connect(func(_f): _bobber = null)
+	_bobber = b
+	anim.attack("bow")
+	Sfx.play_at("swing", global_position, get_tree().current_scene, -10.0, 1.3)
+
+# ─────────────────────────────────────────── 마법 (에이트르)
+func _cast_staff(id: String, item: Dictionary) -> void:
+	var cost := float(item.get("eitr_cost", 20.0))
+	if stats.max_eitr <= 0.0:
+		GameState.msg(tr("MSG_NO_EITR_FOOD"))
+		Sfx.play("error", -12.0)
+		return
+	if not stats.use_eitr(cost):
+		GameState.msg(tr("MSG_NOT_ENOUGH_EITR"))
+		Sfx.play("error", -12.0)
+		return
+	_attack_cd = 1.0 / maxf(float(item.get("spd", 0.9)), 0.2)
+	anim.attack("stab")
+	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
+	var scene := get_tree().current_scene
+	var col := ItemDB.color_of(id)
+	match str(item.get("staff", "bolt")):
+		"bolt":
+			var dmg := ItemDB.total_damage(id, q)
+			var dir := -cam.global_transform.basis.z.normalized()
+			var pr := Projectile.make(dmg, col, self)
+			scene.add_child(pr)
+			pr.gravity = 0.0
+			pr.knockback = 40.0
+			pr.launch(cam.global_position + dir * 1.2, dir * 42.0)
+			Sfx.play_at("bow_shoot", global_position, scene, -4.0, 0.7)
+		"shield":
+			stats.add_status("magic_shield", 30.0)
+			Fx.burst(scene, global_position + Vector3(0, 1.0, 0), col, 40, 4.0, 0.1, 1.2)
+			Sfx.play("level_up", -8.0, 0.9)
+			GameState.msg(tr("MSG_SHIELD_UP"))
+		"summon":
+			var fwd := -Basis(Vector3.UP, yaw).z
+			for i in range(2):
+				var off := fwd.rotated(Vector3.UP, (float(i) - 0.5) * 0.8) * 3.0
+				var pos := global_position + off
+				pos.y = GameState.height_at(pos.x, pos.z) + 0.4
+				var e := Enemy.spawn("skeleton", scene, pos)
+				if e:
+					e.set_meta("friendly", true)
+					e.add_to_group("tamed")
+			Fx.burst(scene, global_position, col, 30, 4.0, 0.09, 1.0)
+			Sfx.play("portal", -6.0, 0.8)
+			GameState.msg(tr("MSG_SUMMONED"))
+	Fx.burst(scene, hand_r.global_position if hand_r else global_position, col,
+		14, 3.0, 0.07, 0.7)
 
 func _has_ammo() -> bool:
 	return inventory.equipped_id(Inventory.SLOT_AMMO) != ""
@@ -577,6 +757,9 @@ func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
 		for k in dmg:
 			dmg[k] = float(dmg[k]) * ratio
 
+	if stats.has_status("magic_shield"):
+		for k in dmg:
+			dmg[k] = float(dmg[k]) * 0.35
 	var taken := stats.take_damage(dmg, inventory.total_armor(), inventory.resistances())
 	if taken > 0.0:
 		anim.hit()
@@ -630,6 +813,13 @@ func _update_interaction() -> void:
 		interact_target_changed.emit(found)
 
 func _do_interact() -> void:
+	# 승선 중이면 먼저 하선
+	if has_meta("boat"):
+		var b = get_meta("boat")
+		if b != null and is_instance_valid(b):
+			b.interact(self)
+			return
+		remove_meta("boat")
 	if _interact_node != null and is_instance_valid(_interact_node):
 		if _interact_node.has_method("interact"):
 			_interact_node.interact(self)

@@ -36,6 +36,12 @@ func max_hp() -> float:
 		v += 0.0
 	return v
 
+func max_eitr_value() -> float:
+	var v := 0.0
+	for f in foods:
+		v += float(f.get("eitr", 0.0)) * _food_falloff(f)
+	return v
+
 func max_stamina() -> float:
 	var v := Const.BASE_STAMINA
 	for f in foods:
@@ -98,6 +104,16 @@ func update(delta: float, moving: bool) -> void:
 			rate *= 0.6
 		set_stamina(stamina + rate * delta)
 
+	# 에이트르 재생
+	max_eitr = max_eitr_value()
+	if max_eitr > 0.0:
+		var er := 4.0
+		if GameState.power_is_active("queen"):
+			er *= 2.0
+		eitr = clampf(eitr + er * delta, 0.0, max_eitr)
+	else:
+		eitr = 0.0
+
 	_update_status(delta)
 
 func _update_status(delta: float) -> void:
@@ -149,6 +165,12 @@ func heal(v: float) -> void:
 func set_stamina(v: float) -> void:
 	stamina = clampf(v, 0.0, max_stamina())
 	stamina_changed.emit(stamina, max_stamina())
+
+func use_eitr(v: float) -> bool:
+	if eitr < v:
+		return false
+	eitr -= v
+	return true
 
 func use_stamina(v: float) -> bool:
 	if stamina < v:
@@ -236,7 +258,8 @@ func eat(id: String) -> bool:
 	if foods.size() >= Const.FOOD_SLOTS:
 		return false
 	foods.append({"id": id, "t": float(it["dur"]), "dur": float(it["dur"]),
-		"hp": float(it["hp"]), "sp": float(it["sp"]), "reg": float(it["reg"])})
+		"hp": float(it["hp"]), "sp": float(it["sp"]), "reg": float(it["reg"]),
+		"eitr": float(it.get("eitr", 0.0))})
 	food_changed.emit()
 	hp_changed.emit(hp, max_hp())
 	stamina_changed.emit(stamina, max_stamina())

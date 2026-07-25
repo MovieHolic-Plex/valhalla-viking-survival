@@ -5,6 +5,10 @@ extends RefCounted
 
 var seed_value: int = 0
 
+## 지형 변형(괭이/곡괭이) — 1m 격자의 높이 보정치
+var mods: Dictionary = {}          # Vector2i -> float
+var mod_chunks: Dictionary = {}    # Vector2i(청크) -> true
+
 var _cont: FastNoiseLite      # 대륙 형태
 var _hill: FastNoiseLite      # 언덕
 var _det: FastNoiseLite       # 잔디테일
@@ -33,6 +37,13 @@ static func _mk(sv: int, freq: float, oct: int, type: int) -> FastNoiseLite:
 
 # ─────────────────────────────────────────────────────── 높이
 func height(x: float, z: float) -> float:
+	var h := base_height(x, z)
+	if not mods.is_empty():
+		h += mod_at(x, z)
+	return h
+
+## 플레이어가 손댄 적 없는 원본 지형 높이
+func base_height(x: float, z: float) -> float:
 	var d := sqrt(x * x + z * z)
 	var rn := d / Const.WORLD_RADIUS
 
@@ -73,6 +84,116 @@ func height(x: float, z: float) -> float:
 	if rn > 1.0:
 		h = minf(h, Const.WATER_LEVEL - 30.0 - (rn - 1.0) * 200.0)
 	return h
+
+## 1m 격자 보정치를 이중선형 보간해 매끄럽게 이어붙인다
+func mod_at(x: float, z: float) -> float:
+	var fx: float = floor(x)
+	var fz: float = floor(z)
+	var tx: float = x - fx
+	var tz: float = z - fz
+	var ix := int(fx)
+	var iz := int(fz)
+	var m00: float = float(mods.get(Vector2i(ix, iz), 0.0))
+	var m10: float = float(mods.get(Vector2i(ix + 1, iz), 0.0))
+	var m01: float = float(mods.get(Vector2i(ix, iz + 1), 0.0))
+	var m11: float = float(mods.get(Vector2i(ix + 1, iz + 1), 0.0))
+	return lerp(lerp(m00, m10, tx), lerp(m01, m11, tx), tz)
+
+## 지형 변형 적용. mode: "level"(평탄화) / "raise"(융기) / "dig"(굴착)
+## 반환: 갱신이 필요한 청크 키 목록
+func modify(center: Vector3, radius: float, mode: String,
+		amount: float = 0.5) -> Array:
+	var touched: Dictionary = {}
+	var r := int(ceil(radius)) + 1
+	var cx := int(round(center.x))
+	var cz := int(round(center.z))
+	for dz in range(-r, r + 1):
+		for dx in range(-r, r + 1):
+			var gx := cx + dx
+			var gz := cz + dz
+			var d := sqrt(float(dx * dx + dz * dz))
+			if d > radius:
+				continue
+			var falloff: float = 1.0 - smoothstep(radius * 0.45, radius, d)
+			var key := Vector2i(gx, gz)
+			var cur: float = float(mods.get(key, 0.0))
+			var base := base_height(float(gx), float(gz))
+			var now := base + cur
+			var want := now
+			match mode:
+				"level":
+					want = lerp(now, center.y, falloff)
+				"raise":
+					want = now + amount * falloff
+				"dig":
+					want = now - amount * falloff
+			# 원본 대비 ±12m 로 제한 (지형이 무한히 솟거나 꺼지는 것 방지)
+			var delta: float = clampf(want - base, -12.0, 12.0)
+			if absf(delta) < 0.001:
+				mods.erase(key)
+			else:
+				mods[key] = delta
+			var ck := Vector2i(int(floor(float(gx) / Const.CHUNK_SIZE)),
+				int(floor(float(gz) / Const.CHUNK_SIZE)))
+			touched[ck] = true
+			mod_chunks[ck] = true
+			# 청크 경계에 걸친 지점은 이웃 청크도 갱신해야 이음매가 안 생긴다
+			for ox in [-1, 1]:
+				var ck2 := Vector2i(int(floor((float(gx) + float(ox)) / Const.CHUNK_SIZE)),
+					int(floor(float(gz) / Const.CHUNK_SIZE)))
+				touched[ck2] = true
+			for oz in [-1, 1]:
+				var ck3 := Vector2i(int(floor(float(gx) / Const.CHUNK_SIZE)),
+					int(floor((float(gz) + float(oz)) / Const.CHUNK_SIZE)))
+				touched[ck3] = true
+	return touched.keys()
+
+## 바이옴별 던전 입구 위치를 결정적으로 고른다
+func dungeon_sites(biome: int, count: int) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value * 977 + biome * 131 + 7
+	var out: Array = []
+	var guard := 0
+	while out.size() < count and guard < 20000:
+		guard += 1
+		var a := rng.randf() * TAU
+		var d := sqrt(rng.randf()) * Const.WORLD_RADIUS * 0.95
+		var x := cos(a) * d
+		var z := sin(a) * d
+		var h := base_height(x, z)
+		if h < Const.WATER_LEVEL + 2.0:
+			continue
+		if biome_from(x, z, h) != biome:
+			continue
+		if slope_at(x, z) > 0.30:
+			continue
+		# 서로 너무 가깝지 않게
+		var ok := true
+		for p in out:
+			if Vector2(p.x - x, p.z - z).length() < 220.0:
+				ok = false
+				break
+		if ok:
+			out.append(Vector3(x, h, z))
+	return out
+
+func mods_to_array() -> Array:
+	var out: Array = []
+	for k in mods:
+		out.append([k.x, k.y, float(mods[k])])
+	return out
+
+func mods_from_array(arr) -> void:
+	mods.clear()
+	mod_chunks.clear()
+	if not (arr is Array):
+		return
+	for e in arr:
+		if e is Array and e.size() == 3:
+			var key := Vector2i(int(e[0]), int(e[1]))
+			mods[key] = float(e[2])
+			mod_chunks[Vector2i(int(floor(float(key.x) / Const.CHUNK_SIZE)),
+				int(floor(float(key.y) / Const.CHUNK_SIZE)))] = true
 
 func _swamp_factor(x: float, z: float, rn: float) -> float:
 	if rn < 0.24 or rn > 0.60:

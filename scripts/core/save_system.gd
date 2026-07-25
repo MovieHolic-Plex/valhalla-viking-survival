@@ -34,6 +34,7 @@ func save_game(player, build_system, slot: String = SLOT) -> bool:
 		"player": player.to_dict(),
 		"spawn": _v3_arr(player.get_meta("spawn_point", Vector3.ZERO)),
 		"removed": _pack_removed(),
+		"terrain": GameState.gen.mods_to_array() if GameState.gen != null else [],
 		"discovered": _pack_discovered(),
 		"pieces": build_system.to_dict() if build_system != null else [],
 		"tombs": _pack_tombs(player),
@@ -75,6 +76,8 @@ func load_game(player, build_system, slot: String = SLOT) -> bool:
 		if st.has(k):
 			GameState.stats[k] = st[k]
 	_unpack_removed(d.get("removed", {}))
+	if GameState.gen != null:
+		GameState.gen.mods_from_array(d.get("terrain", []))
 	_unpack_discovered(d.get("discovered", []))
 
 	if player != null and is_instance_valid(player):

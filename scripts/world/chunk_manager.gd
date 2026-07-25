@@ -39,6 +39,9 @@ func _process(_delta: float) -> void:
 	var p := GameState.player
 	if p == null or not is_instance_valid(p):
 		return
+	# 던전 안에서는 지상 청크를 건드리지 않는다
+	if p.has_meta("in_dungeon"):
+		return
 	var c := _to_chunk(p.global_position)
 	if c != _center:
 		_center = c
@@ -128,6 +131,28 @@ func _on_prop_destroyed(node, key: Vector2i) -> void:
 	var idx: int = node.get_meta("idx", -1)
 	if idx >= 0:
 		GameState.mark_prop_removed(key, idx)
+
+## 지형이 변형된 청크를 즉시 다시 만든다
+func rebuild(keys: Array) -> void:
+	for k in keys:
+		if not chunks.has(k):
+			continue
+		var d: int = maxi(absi(k.x - _center.x), absi(k.y - _center.y))
+		var tier := _tier_for(d)
+		if tier < 0:
+			continue
+		var old = chunks[k]
+		if is_instance_valid(old):
+			old.queue_free()
+		chunks.erase(k)
+		chunk_tier.erase(k)
+		if not _queue.has(k):
+			_queue.push_front(k)
+	# 변형 직후에는 곧바로 만들어 플레이어가 빠지지 않게 한다
+	var guard := 0
+	while not _queue.is_empty() and guard < 64:
+		guard += 1
+		_build_next()
 
 ## 이 지점에 지형 충돌체가 준비돼 있는가
 func has_collision_at(pos: Vector3) -> bool:

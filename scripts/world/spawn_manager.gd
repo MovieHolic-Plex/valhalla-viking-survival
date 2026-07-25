@@ -22,6 +22,8 @@ func _process(delta: float) -> void:
 	var p := GameState.player
 	if p == null or not is_instance_valid(p) or p.stats.is_dead:
 		return
+	if p.has_meta("in_dungeon"):
+		return
 
 	_timer -= delta
 	if _timer <= 0.0:

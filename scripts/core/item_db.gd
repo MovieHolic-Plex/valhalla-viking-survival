@@ -245,6 +245,11 @@ func _build() -> void:
 	_food("lox_pie", 80, 55, 1800, 4.0, Color(0.80, 0.60, 0.35))
 	_food("fish_wraps", 70, 65, 1800, 4.0, Color(0.75, 0.75, 0.60))
 	_food("eitr_bread", 40, 30, 1800, 3.0, Color(0.70, 0.62, 0.95))
+	items["eitr_bread"]["eitr"] = 40.0
+	_food("sap_stew", 30, 25, 1700, 2.0, Color(0.55, 0.80, 0.62))
+	items["sap_stew"]["eitr"] = 55.0
+	_food("mushroom_omelette", 55, 22, 1600, 3.0, Color(0.92, 0.82, 0.45))
+	items["mushroom_omelette"]["eitr"] = 30.0
 
 	# 회복 물약 · 특수 소모품
 	_add("mead_health", {"t": T.CONSUMABLE, "st": 10, "w": 1.0, "col": Color(0.90, 0.25, 0.30),
@@ -268,6 +273,22 @@ func _build() -> void:
 	_add("torch", {"t": T.TOOL, "w": 1.0, "col": Color(1.00, 0.62, 0.20), "light": true,
 		"dmg": {D.BLUNT: 5.0, D.FIRE: 10.0}, "spd": 1.1, "stam": 8.0, "rng": 2.0, "skill": S.CLUBS,
 		"up": 3, "upmat": {"resin": 5}})
+
+	_add("fishing_rod", {"t": T.TOOL, "w": 2.0, "col": Color(0.62, 0.48, 0.30),
+		"fishing": true, "dmg": {D.BLUNT: 3.0}, "spd": 1.0, "stam": 6.0, "rng": 2.0,
+		"skill": S.KNIVES})
+	_mat("fishing_bait", 0.1, Color(0.85, 0.55, 0.40), 100)
+	_food("leech_fish", 30, 14, 900, 1.0, Color(0.55, 0.25, 0.30))
+
+	# 지팡이 — 에이트르를 소모해 시전한다
+	_staff("staff_fire", {D.FIRE: 90.0}, 22.0, Color(1.0, 0.48, 0.14),
+		{"eitr": 6, "surtling_core": 3, "fine_wood": 10, "yggdrasil_wood": 10})
+	_staff("staff_frost", {D.FROST: 75.0, D.PIERCE: 20.0}, 20.0,
+		Color(0.60, 0.88, 1.0), {"eitr": 6, "freeze_gland": 5, "yggdrasil_wood": 10})
+	_staff("staff_shield", {}, 30.0, Color(0.75, 0.80, 0.95),
+		{"eitr": 8, "silver": 10, "yggdrasil_wood": 10}, "shield")
+	_staff("staff_skeleton", {}, 40.0, Color(0.85, 0.85, 0.78),
+		{"eitr": 8, "withered_bone": 10, "yggdrasil_wood": 10}, "summon")
 
 	_pick("antler_pickaxe", 1, 22.0, 0.9, Color(0.82, 0.74, 0.56), {"hard_antler": 4})
 	_pick("bronze_pickaxe", 2, 30.0, 1.0, Color(0.80, 0.55, 0.22), {"bronze": 3})
@@ -388,6 +409,13 @@ func _wep(id: String, skill: int, dmg: Dictionary, spd: float, stam: float, rng:
 		kb: float, col: Color, upmat: Dictionary, tier: int = 0) -> void:
 	_add(id, {"t": T.WEAPON, "w": 2.0, "col": col, "dmg": dmg, "spd": spd, "stam": stam,
 		"rng": rng, "kb": kb, "skill": skill, "tier": tier, "up": 4, "upmat": upmat})
+
+## 지팡이: eitr 소모, mode = bolt / shield / summon
+func _staff(id: String, dmg: Dictionary, eitr_cost: float, col: Color,
+		upmat: Dictionary, mode: String = "bolt") -> void:
+	_add(id, {"t": T.WEAPON, "w": 3.0, "col": col, "dmg": dmg, "spd": 0.9,
+		"stam": 4.0, "rng": 40.0, "kb": 30.0, "skill": S.KNIVES,
+		"staff": mode, "eitr_cost": eitr_cost, "up": 4, "upmat": upmat})
 
 func _pick(id: String, tier: int, dmg: float, spd: float, col: Color, upmat: Dictionary) -> void:
 	_add(id, {"t": T.TOOL, "w": 3.0, "col": col, "dmg": {D.PICKAXE: dmg, D.BLUNT: dmg * 0.4},

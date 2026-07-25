@@ -64,6 +64,8 @@ func _build_craft() -> void:
 	_c("rag_hood", {"leather_scraps": 4}, ST_WORKBENCH)
 	_c("rag_tunic", {"leather_scraps": 6}, ST_WORKBENCH)
 	_c("antler_pickaxe", {"hard_antler": 1, "wood": 10}, ST_WORKBENCH)
+	_c("fishing_rod", {"fine_wood": 8, "linen_thread": 4}, ST_WORKBENCH, 2)
+	_c("fishing_bait", {"neck_tail": 1}, ST_WORKBENCH, 1, 20)
 
 	# 작업대 lv2 — 가죽/사슴
 	_c("leather_helmet", {"deer_hide": 6, "bone_fragments": 8}, ST_WORKBENCH, 2)
@@ -140,6 +142,12 @@ func _build_craft() -> void:
 	_c("feather_cape", {"feathers": 10, "eitr": 20, "sap": 5}, ST_FORGE, 5)
 	_c("flametal_greatsword", {"flametal": 25, "charred_bone": 10, "blood_clot": 5}, ST_FORGE, 6)
 
+	# 지팡이 — 장인의 탁자에서 만든다
+	_c("staff_fire", {"eitr": 20, "surtling_core": 6, "yggdrasil_wood": 20}, ST_ARTISAN, 1)
+	_c("staff_frost", {"eitr": 20, "freeze_gland": 10, "yggdrasil_wood": 20}, ST_ARTISAN, 1)
+	_c("staff_shield", {"eitr": 30, "silver": 20, "yggdrasil_wood": 20}, ST_ARTISAN, 1)
+	_c("staff_skeleton", {"eitr": 30, "withered_bone": 20, "yggdrasil_wood": 20}, ST_ARTISAN, 1)
+
 	# 가마솥 — 조리 레시피
 	_c("queens_jam", {"raspberries": 8, "blueberries": 8}, ST_CAULDRON, 1, 4)
 	_c("carrot_soup", {"mushroom": 1, "carrot": 3}, ST_CAULDRON, 2)
@@ -151,6 +159,8 @@ func _build_craft() -> void:
 	_c("lox_pie", {"barley_flour": 10, "cloudberry": 2, "lox_meat": 2}, ST_CAULDRON, 4)
 	_c("fish_wraps", {"cooked_fish": 2, "barley_flour": 4}, ST_CAULDRON, 4)
 	_c("eitr_bread", {"barley_flour": 10, "sap": 2}, ST_CAULDRON, 5)
+	_c("sap_stew", {"sap": 1, "mushroom": 1, "blueberries": 5}, ST_CAULDRON, 5)
+	_c("mushroom_omelette", {"mushroom": 2, "honey": 2, "queens_jam": 1}, ST_CAULDRON, 4)
 	_c("mead_health", {"honey": 10, "raspberries": 5, "blueberries": 10}, ST_CAULDRON, 1, 6)
 	_c("mead_stamina", {"honey": 10, "mushroom": 10, "thistle": 10}, ST_CAULDRON, 2, 6)
 	_c("mead_poison", {"honey": 10, "thistle": 5, "neck_tail": 1, "coal": 10}, ST_CAULDRON, 2, 6)
@@ -217,6 +227,16 @@ func _build_pieces() -> void:
 	_p("portal", 0, {"fine_wood": 20, "surtling_core": 2, "greydwarf_eye": 10}, "portal",
 		Vector3(2.2, 3.0, 0.6), {"portal": true})
 	_p("sign", 0, {"wood": 2, "coal": 1}, "sign", Vector3(1.2, 1.4, 0.2))
+
+	# 배 — 물 위에만 건조할 수 있다
+	_p("raft", 0, {"wood": 20, "leather_scraps": 6, "resin": 6}, "boat",
+		Vector3(3.0, 1.0, 4.0), {"boat": "raft", "needs_workbench": true, "water": true})
+	_p("karve", 0, {"fine_wood": 30, "deer_hide": 10, "resin": 20, "bronze_nails": 80},
+		"boat", Vector3(2.6, 1.2, 7.0),
+		{"boat": "karve", "needs_workbench": true, "water": true})
+	_p("longship", 0, {"ancient_bark": 40, "deer_hide": 10, "iron_nails": 100,
+		"fine_wood": 40}, "boat", Vector3(3.4, 1.4, 11.0),
+		{"boat": "longship", "needs_workbench": true, "water": true})
 
 	# 1 · 목재 구조물
 	_p("wood_floor", 1, {"wood": 2}, "floor", Vector3(2, 0.2, 2), {"support": 1.0})

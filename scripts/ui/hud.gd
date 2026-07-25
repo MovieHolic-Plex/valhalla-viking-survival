@@ -8,6 +8,9 @@ var hp_bar: ProgressBar
 var sp_bar: ProgressBar
 var hp_label: Label
 var sp_label: Label
+var eitr_bar: ProgressBar
+var eitr_label: Label
+var _eitr_row: HBoxContainer
 var food_box: HBoxContainer
 var status_box: HBoxContainer
 var hotbar: HBoxContainer
@@ -79,6 +82,16 @@ func _build() -> void:
 	sp_row.add_child(sp_bar)
 	sp_label = UITheme.label("50 / 50", 13, UITheme.TEXT_DIM)
 	sp_row.add_child(sp_label)
+
+	var eitr_row := HBoxContainer.new()
+	eitr_row.add_theme_constant_override("separation", 6)
+	left.add_child(eitr_row)
+	eitr_bar = UITheme.make_bar(Color(0.55, 0.45, 0.95), 300, 12)
+	eitr_row.add_child(eitr_bar)
+	eitr_label = UITheme.label("", 12, UITheme.TEXT_DIM)
+	eitr_row.add_child(eitr_label)
+	eitr_row.visible = false
+	_eitr_row = eitr_row
 
 	status_box = HBoxContainer.new()
 	status_box.add_theme_constant_override("separation", 5)
@@ -212,6 +225,13 @@ func _process(_delta: float) -> void:
 		hide_boss_bar()
 
 	if player != null and is_instance_valid(player):
+		# 에이트르는 마법 음식을 먹었을 때만 표시한다
+		if _eitr_row != null:
+			var me := player.stats.max_eitr
+			_eitr_row.visible = me > 0.0
+			if me > 0.0:
+				eitr_bar.value = clampf(player.stats.eitr / me, 0.0, 1.0)
+				eitr_label.text = "%d / %d" % [ceili(player.stats.eitr), ceili(me)]
 		var rid := player.inventory.equipped_id(Inventory.SLOT_RIGHT)
 		crosshair.visible = player.spring.spring_length < 2.0 \
 			or bool(ItemDB.get_item(rid).get("bow", false))

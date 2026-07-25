@@ -33,6 +33,15 @@ var _rng := RandomNumberGenerator.new()
 var _stuck_t := 0.0
 var _last_p := Vector3.ZERO
 
+# ── 길들이기 / 번식 ──
+var tamed := false
+var tame_progress := 0
+var is_baby := false
+var _grow_t := 0.0
+var _breed_cd := 0.0
+var _eat_cd := 0.0
+var _tag: Label3D
+
 static func spawn(id: String, parent: Node, pos: Vector3) -> Enemy:
 	var c := EnemyDB.get_cfg(id)
 	if c.is_empty():
@@ -71,6 +80,20 @@ func _ready() -> void:
 	_wander_target = global_position
 	_last_p = global_position
 	name = "enemy_" + str(cfg.get("id", "?"))
+
+	if get_meta("friendly", false):
+		tamed = true
+	if cfg.has("tame") or tamed:
+		_tag = Label3D.new()
+		_tag.font_size = 28
+		_tag.pixel_size = 0.0035
+		_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_tag.outline_size = 7
+		_tag.position = Vector3(0, 2.5 * _size, 0)
+		_tag.visible = false
+		add_child(_tag)
+	if tamed:
+		_become_tamed(false)
 
 func _build_rig() -> void:
 	var rc: Dictionary = cfg.get("rig_cfg", {})
@@ -146,6 +169,7 @@ func _physics_process(delta: float) -> void:
 			_telegraph = -1.0
 			_do_attack()
 
+	_update_taming(delta)
 	_acquire_target()
 	if _stagger_time > 0.0:
 		velocity.x = move_toward(velocity.x, 0.0, 20.0 * delta)
@@ -164,6 +188,9 @@ func _physics_process(delta: float) -> void:
 	anim.update(delta, clampf(sp, 0.0, 1.0), not is_on_floor() and not _flying, false)
 
 func _acquire_target() -> void:
+	if tamed:
+		_acquire_target_tamed()
+		return
 	var p := GameState.player
 	if p == null or not is_instance_valid(p) or p.stats.is_dead:
 		target = null
@@ -186,6 +213,160 @@ func _acquire_target() -> void:
 		if d > aggro * 2.2:
 			target = null
 			state = St.WANDER
+
+## 길들여진 개체: 근처 적을 공격하고, 없으면 주인을 따라다닌다
+func _acquire_target_tamed() -> void:
+	if is_baby:
+		target = null
+		return
+	if target != null and is_instance_valid(target) and target is Enemy \
+			and not target._dead:
+		return
+	target = null
+	var best := 22.0
+	for e in get_tree().get_nodes_in_group("enemy"):
+		if e == self or not is_instance_valid(e) or e._dead:
+			continue
+		if e.tamed or e.is_in_group("tamed"):
+			continue
+		var d := global_position.distance_to(e.global_position)
+		if d < best:
+			best = d
+			target = e
+	if target != null:
+		state = St.CHASE
+	else:
+		# 주인 곁을 지킨다
+		var p := GameState.player
+		if p != null and is_instance_valid(p):
+			var pd := global_position.distance_to(p.global_position)
+			if pd > 8.0 and pd < 60.0:
+				_wander_target = p.global_position
+				state = St.WANDER
+				_timer = 3.0
+			elif state == St.CHASE or state == St.ATTACK:
+				state = St.IDLE
+
+## 근처에 떨어진 먹이를 먹으며 마음을 연다
+func _update_taming(delta: float) -> void:
+	if _tag != null:
+		_tag.visible = tamed or tame_progress > 0
+	if is_baby:
+		_grow_t -= delta
+		if _grow_t <= 0.0:
+			is_baby = false
+			_size = float(cfg.get("size", 1.0))
+			if rig:
+				rig.scale = Vector3.ONE
+			max_hp = float(cfg.get("hp", 20.0))
+			hp = max_hp
+			_refresh_tag()
+	if _breed_cd > 0.0:
+		_breed_cd -= delta
+	if _eat_cd > 0.0:
+		_eat_cd -= delta
+		return
+	var tc: Dictionary = cfg.get("tame", {})
+	if tc.is_empty():
+		return
+
+	# 먹이 찾기
+	var foods: Array = tc.get("food", [])
+	for d in get_tree().get_nodes_in_group("item_drop"):
+		if not is_instance_valid(d):
+			continue
+		if not (str(d.item_id) in foods):
+			continue
+		if global_position.distance_to(d.global_position) > 3.0:
+			continue
+		d.amount -= 1
+		if d.amount <= 0:
+			d.queue_free()
+		_eat_cd = 6.0
+		Fx.float_text(get_tree().current_scene,
+			global_position + Vector3(0, 1.6 * _size, 0), "♥",
+			Color(1.0, 0.5, 0.6), 0.5)
+		Sfx.play_at("eat", global_position, get_tree().current_scene, -14.0)
+		if tamed:
+			_try_breed()
+		else:
+			tame_progress += 1
+			_refresh_tag()
+			if tame_progress >= int(tc.get("needed", 3)):
+				_become_tamed(true)
+			else:
+				GameState.msg(tr("MSG_TAMING") % tr(str(cfg.get("n", "?"))))
+		return
+
+func _become_tamed(announce: bool) -> void:
+	tamed = true
+	add_to_group("tamed")
+	target = null
+	state = St.IDLE
+	cfg["passive"] = true
+	_refresh_tag()
+	if announce:
+		GameState.msg(tr("MSG_TAMED") % tr(str(cfg.get("n", "?"))))
+		Sfx.play("level_up", -8.0, 1.2)
+		Fx.burst(get_tree().current_scene, global_position + Vector3(0, 1.0 * _size, 0),
+			Color(1.0, 0.55, 0.65), 24, 3.0, 0.07, 1.0)
+
+func _refresh_tag() -> void:
+	if _tag == null:
+		return
+	var nm := tr(str(cfg.get("n", "?")))
+	if is_baby:
+		_tag.text = nm + " (새끼)"
+		_tag.modulate = Color(1.0, 0.85, 0.55)
+	elif tamed:
+		_tag.text = nm + " ♥"
+		_tag.modulate = Color(1.0, 0.62, 0.70)
+	else:
+		var need := int(cfg.get("tame", {}).get("needed", 3))
+		_tag.text = "%d / %d" % [tame_progress, need]
+		_tag.modulate = Color(0.9, 0.9, 0.85)
+
+## 길들여진 같은 종이 근처에 있으면 새끼를 낳는다
+func _try_breed() -> void:
+	if _breed_cd > 0.0 or is_baby:
+		return
+	var tc: Dictionary = cfg.get("tame", {})
+	var baby_id := str(tc.get("baby", ""))
+	if baby_id == "":
+		return
+	# 개체수 상한 — 무한 번식 방지
+	var same := 0
+	var partner: Enemy = null
+	for e in get_tree().get_nodes_in_group("tamed"):
+		if not is_instance_valid(e) or not (e is Enemy):
+			continue
+		if str(e.cfg.get("id", "")) != str(cfg.get("id", "")):
+			continue
+		same += 1
+		if e != self and not e.is_baby and global_position.distance_to(e.global_position) < 8.0:
+			partner = e
+	if partner == null or same >= 8:
+		return
+	_breed_cd = 90.0
+	partner._breed_cd = 90.0
+	var pos := global_position + Vector3(randf_range(-1.5, 1.5), 0.3,
+		randf_range(-1.5, 1.5))
+	var baby := Enemy.spawn(baby_id, get_tree().current_scene, pos)
+	if baby == null:
+		return
+	baby.tamed = true
+	baby.is_baby = true
+	baby._grow_t = 180.0
+	baby.add_to_group("tamed")
+	baby.cfg["passive"] = true
+	baby._size *= 0.45
+	if baby.rig:
+		baby.rig.scale = Vector3(0.45, 0.45, 0.45)
+	baby.max_hp *= 0.3
+	baby.hp = baby.max_hp
+	baby._refresh_tag()
+	GameState.msg(tr("MSG_BABY_BORN") % tr(str(cfg.get("n", "?"))))
+	Fx.burst(get_tree().current_scene, pos, Color(1.0, 0.7, 0.75), 20, 2.5, 0.06, 0.9)
 
 func _st_idle(delta: float) -> void:
 	velocity.x = move_toward(velocity.x, 0.0, 10.0 * delta)
@@ -270,8 +451,10 @@ func _face(dir: Vector3, delta: float) -> void:
 	rotation.y = lerp_angle(rotation.y, want, delta * 7.0)
 
 func _apply_motion(delta: float) -> void:
-	var ground := GameState.height_at(global_position.x, global_position.z)
-	if _flying:
+	var in_dungeon := has_meta("dungeon")
+	var ground := -1e9 if in_dungeon \
+		else GameState.height_at(global_position.x, global_position.z)
+	if _flying and not in_dungeon:
 		var want_y := ground + _hover
 		if target != null and is_instance_valid(target):
 			want_y = maxf(ground + 1.6, target.global_position.y + 1.6)
@@ -290,10 +473,11 @@ func _apply_motion(delta: float) -> void:
 	if global_position.y < ground:
 		global_position.y = ground
 		velocity.y = 0.0
-	# 물에 빠지면 살짝 떠오른다
-	var depth := Const.WATER_LEVEL - global_position.y
-	if depth > 1.0 and not cfg.get("water", false):
-		velocity.y = maxf(velocity.y, 2.0)
+	# 물에 빠지면 살짝 떠오른다 (던전 내부는 제외)
+	if not has_meta("dungeon"):
+		var depth := Const.WATER_LEVEL - global_position.y
+		if depth > 1.0 and not cfg.get("water", false):
+			velocity.y = maxf(velocity.y, 2.0)
 
 	# 끼임 탈출
 	if state == St.CHASE:
@@ -335,6 +519,8 @@ func _do_attack() -> void:
 	var to_t := target.global_position - global_position
 	to_t.y = 0.0
 	if to_t.length() > float(cfg.get("range", 2.0)) * 1.5:
+		return
+	if tamed and target == GameState.player:
 		return
 	if target.has_method("take_hit"):
 		target.take_hit(dmg, global_position, self, float(cfg.get("kb", 25.0)))
@@ -405,6 +591,8 @@ func _die(killer) -> void:
 	GameState.stats["kills"] = int(GameState.stats["kills"]) + 1
 	if _hp_bar:
 		_hp_bar.visible = false
+	if _tag:
+		_tag.visible = false
 	Sfx.play_at("death", global_position, get_tree().current_scene, -4.0,
 		clampf(1.4 / maxf(_size, 0.5), 0.5, 1.6))
 	Fx.burst(get_tree().current_scene, global_position + Vector3(0, 1.0 * _size, 0),

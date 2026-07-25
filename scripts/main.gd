@@ -46,6 +46,7 @@ func _handle_cli() -> void:
 		var dir := ScreenshotDirector.new()
 		dir.out_dir = shots
 		dir.ui_only = args.has("--uionly")
+		dir.new_only = args.has("--newonly")
 		add_child(dir)
 
 # ═══════════════════════════════════════════════ 타이틀
@@ -238,6 +239,7 @@ func _start_world(sv: int, from_save: bool) -> void:
 	add_child(spawner)
 
 	_place_altars()
+	_place_dungeons()
 
 	# 첫 지형을 미리 만들어 낙하 방지
 	chunks.preload_around(player.global_position)
@@ -260,6 +262,21 @@ func _start_world(sv: int, from_save: bool) -> void:
 	add_child(wind)
 	wind.play()
 
+## 던전 입구 배치 — 검은 숲 매장지, 늪 수몰묘지, 설산 얼음동굴
+func _place_dungeons() -> void:
+	var plan := [["crypt", Const.Biome.BLACKFOREST, 10],
+		["sunken", Const.Biome.SWAMP, 8], ["cave", Const.Biome.MOUNTAIN, 5]]
+	var idx := 0
+	for entry in plan:
+		var k: String = str(entry[0])
+		var biome: int = int(entry[1])
+		var n: int = int(entry[2])
+		for pos in GameState.gen.dungeon_sites(biome, n):
+			var e := DungeonEntrance.make(k, GameState.world_seed + idx * 7919, idx)
+			add_child(e)
+			e.global_position = pos
+			idx += 1
+
 func _place_altars() -> void:
 	for id in Boss.DB:
 		var c: Dictionary = Boss.DB[id]
@@ -272,8 +289,8 @@ func _place_altars() -> void:
 func _process(_delta: float) -> void:
 	if not started or player == null or not is_instance_valid(player):
 		return
-	# 월드 밖으로 떨어지면 되돌린다
-	if player.global_position.y < -300.0:
+	# 월드 밖으로 떨어지면 되돌린다 (던전 안은 예외)
+	if player.global_position.y < -300.0 and not player.has_meta("in_dungeon"):
 		var sp: Vector3 = player.get_meta("spawn_point", Vector3.ZERO)
 		player.global_position = sp + Vector3(0, 2, 0)
 		player.velocity = Vector3.ZERO

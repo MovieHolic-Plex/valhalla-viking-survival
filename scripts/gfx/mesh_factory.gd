@@ -790,6 +790,14 @@ func piece(kind: String, size: Vector3, col: Color) -> Mesh:
 		"plant":
 			mb.cyl(Transform3D(Basis.IDENTITY, Vector3(0, -size.y * 0.5, 0)),
 				size.x * 0.5, size.x * 0.44, 0.05, 7, Color(0.28, 0.20, 0.13))
+		"boat":
+			mb.box(Transform3D(Basis.IDENTITY, Vector3(0, 0, 0)),
+				Vector3(size.x, 0.4, size.z * 0.94), col)
+			for sx in [-1.0, 1.0]:
+				mb.box(Transform3D(Basis.IDENTITY, Vector3(size.x * 0.5 * sx, 0.3, 0)),
+					Vector3(0.16, 0.5, size.z * 0.94), dark)
+			mb.cyl(Transform3D(Basis.IDENTITY, Vector3(0, 0.2, 0)),
+				0.10, 0.08, size.z * 0.6, 6, dark)
 		_:
 			mb.box(Transform3D.IDENTITY, size, col)
 	_cache[k] = mb.commit()

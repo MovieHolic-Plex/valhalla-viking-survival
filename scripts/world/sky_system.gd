@@ -6,7 +6,7 @@ extends Node3D
 var env: WorldEnvironment
 var sun: DirectionalLight3D
 var moon: DirectionalLight3D
-var _sky_mat: ProceduralSkyMaterial
+var _sky_mat: ShaderMaterial
 
 var rain: GPUParticles3D
 var snow: GPUParticles3D
@@ -39,14 +39,17 @@ func _make_env() -> void:
 	e.background_mode = Environment.BG_SKY
 
 	var sky := Sky.new()
-	_sky_mat = ProceduralSkyMaterial.new()
-	_sky_mat.sky_top_color = Color(0.24, 0.42, 0.68)
-	_sky_mat.sky_horizon_color = Color(0.70, 0.78, 0.82)
-	_sky_mat.ground_bottom_color = Color(0.16, 0.18, 0.18)
-	_sky_mat.ground_horizon_color = Color(0.62, 0.68, 0.70)
-	_sky_mat.sun_angle_max = 12.0
-	_sky_mat.sun_curve = 0.08
+	var sh := Shader.new()
+	sh.code = SkyShaderLib.SKY
+	_sky_mat = ShaderMaterial.new()
+	_sky_mat.shader = sh
+	_sky_mat.set_shader_parameter("cloud_tex", SkyShaderLib.make_cloud_texture(128))
+	_sky_mat.set_shader_parameter("top_color", Color(0.20, 0.40, 0.72))
+	_sky_mat.set_shader_parameter("horizon_color", Color(0.72, 0.80, 0.84))
+	_sky_mat.set_shader_parameter("ground_color", Color(0.14, 0.15, 0.16))
 	sky.sky_material = _sky_mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME
 	e.sky = sky
 
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -197,18 +200,37 @@ func _update_sun() -> void:
 	moon.light_energy = lerpf(0.16, 0.0, day_amt)
 
 	var e := env.environment
-	# 하늘색
-	var top_day := Color(0.22, 0.42, 0.72)
-	var top_night := Color(0.025, 0.035, 0.075)
-	var hor_day := Color(0.72, 0.80, 0.84)
-	var hor_night := Color(0.07, 0.09, 0.15)
-	_sky_mat.sky_top_color = top_night.lerp(top_day, day_amt)
-	_sky_mat.sky_horizon_color = hor_night.lerp(hor_day, day_amt).lerp(
-		Color(1.0, 0.52, 0.26), dusk * 0.75)
-	_sky_mat.ground_horizon_color = _sky_mat.sky_horizon_color.darkened(0.35)
-	_sky_mat.ground_bottom_color = Color(0.08, 0.09, 0.10).lerp(
-		Color(0.18, 0.20, 0.20), day_amt)
-	_sky_mat.sky_energy_multiplier = lerpf(0.35, 1.0, day_amt)
+	# 하늘색 — 낮/밤/노을을 섞는다
+	var top_day := Color(0.20, 0.41, 0.74)
+	var top_night := Color(0.020, 0.030, 0.070)
+	var hor_day := Color(0.74, 0.82, 0.86)
+	var hor_night := Color(0.06, 0.08, 0.14)
+	var top: Color = top_night.lerp(top_day, day_amt)
+	var hor: Color = hor_night.lerp(hor_day, day_amt).lerp(
+		Color(1.0, 0.50, 0.24), dusk * 0.80)
+	_sky_mat.set_shader_parameter("top_color", top)
+	_sky_mat.set_shader_parameter("horizon_color", hor)
+	_sky_mat.set_shader_parameter("ground_color", Color(0.07, 0.08, 0.09).lerp(
+		Color(0.17, 0.19, 0.19), day_amt))
+	_sky_mat.set_shader_parameter("sun_color", sun.light_color)
+	_sky_mat.set_shader_parameter("day_amount", day_amt)
+	_sky_mat.set_shader_parameter("dusk_amount", dusk)
+	_sky_mat.set_shader_parameter("star_amount", clampf(1.0 - day_amt * 2.2, 0.0, 1.0))
+	_sky_mat.set_shader_parameter("moon_dir",
+		-moon.global_transform.basis.z.normalized())
+	var cloudy := 0.55 if weather in ["cloudy", "rain", "storm", "snow"] else 0.28
+	if weather == "storm":
+		cloudy = 0.85
+	_sky_mat.set_shader_parameter("cloud_amount", cloudy)
+
+	# 물에도 태양 정보를 넘겨 윤슬을 만든다
+	if MatLib.water_mat != null:
+		MatLib.water_mat.set_shader_parameter("sun_dir",
+			sun.global_transform.basis.z.normalized())
+		MatLib.water_mat.set_shader_parameter("sun_col",
+			sun.light_color * maxf(day_amt, 0.05))
+		MatLib.water_mat.set_shader_parameter("choppy",
+			2.0 if weather == "storm" else (1.4 if weather == "rain" else 1.0))
 
 	e.tonemap_exposure = lerpf(1.20, 0.88, day_amt)
 	e.adjustment_saturation = lerpf(0.85, 1.22, day_amt)
@@ -292,6 +314,23 @@ func _update_fog(delta: float) -> void:
 	var e := env.environment
 	_fog_color = _fog_color.lerp(tc, delta * 0.7)
 	_fog_density = lerpf(_fog_density, td, delta * 0.7)
+
+	# 던전 안은 캄캄하다
+	var pl := GameState.player
+	if pl != null and is_instance_valid(pl) and pl.has_meta("in_dungeon"):
+		e.fog_light_color = Color(0.16, 0.14, 0.12)
+		e.fog_density = 0.026
+		e.fog_sky_affect = 1.0
+		# 높이 안개는 지하에서 무한히 짙어지므로 반드시 꺼야 한다
+		e.fog_height = -2000.0
+		e.fog_height_density = 0.0
+		e.ambient_light_energy = 0.22
+		sun.light_energy = 0.0
+		moon.light_energy = 0.0
+		return
+	e.ambient_light_energy = 0.85
+	e.fog_height = Const.WATER_LEVEL + 12.0
+	e.fog_height_density = 0.02
 
 	# 수중이면 완전히 다른 안개
 	var cam := get_viewport().get_camera_3d()
