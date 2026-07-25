@@ -7,15 +7,34 @@ extends Node
 ##
 ## 모든 텍스처는 흰색 기준(그레이스케일 + 약한 색조)으로 만들고, 실제 색은
 ## 버텍스 컬러/알베도가 곱한다. 그래야 같은 텍스처를 바이옴마다 재활용할 수 있다.
+##
+## assets/textures/<kind>.png 가 있으면 그 파일을 먼저 쓴다
+## (ambientCG CC0 실측 소스를 64px 근백색 그레이스케일로 가공한 것).
+## 파일이 없는 종류(fur·thatch·leaf)는 아래 절차적 생성으로 폴백한다.
 
 var _cache: Dictionary = {}
 
 func _ready() -> void:
 	pass
 
-func get_tex(kind: String) -> ImageTexture:
+func get_tex(kind: String) -> Texture2D:
 	if _cache.has(kind):
 		return _cache[kind]
+	var t: Texture2D = _file_tex(kind)
+	if t == null:
+		t = _procedural_tex(kind)
+	_cache[kind] = t
+	return t
+
+## 디스크의 실제 텍스처 파일을 우선 사용한다
+func _file_tex(kind: String) -> Texture2D:
+	var path := "res://assets/textures/%s.png" % kind
+	if ResourceLoader.exists(path):
+		return load(path)
+	return null
+
+## 파일이 없을 때 쓰는 절차적 폴백
+func _procedural_tex(kind: String) -> ImageTexture:
 	var t: ImageTexture
 	match kind:
 		"grass": t = _grass(64)

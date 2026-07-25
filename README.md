@@ -1,7 +1,7 @@
 # 발할라 (Valhalla) — 바이킹 서바이벌
 
 > 절차적으로 생성되는 북유럽 세계에서 **채집하고, 짓고, 만들고, 신들에게 버림받은 보스를 사냥하는** 3D 오픈월드 서바이벌 게임.
-> **Godot 4.4 · GDScript · 외부 에셋 0개 (모든 3D 모델·텍스처·효과음을 코드로 생성)**
+> **Godot 4.4 · GDScript · 모든 3D 모델·효과음은 코드로 생성, 지형/소재 텍스처 11종은 CC0 실측 소스 사용**
 
 <p align="center">
   <img src="docs/screenshots/01_meadows_morning.jpg" width="90%">
@@ -17,9 +17,12 @@
 - 등장 이름은 북유럽 신화에서 따왔거나 자체 창작한 것입니다.
 - 상업적 목적이 없으며, 학습·연구용으로 공개합니다.
 
-**핵심 기술적 특징: 이 저장소에는 3D 모델 파일도, 텍스처 이미지도, 오디오 파일도 없습니다.**
+**핵심 기술적 특징: 이 저장소에는 3D 모델 파일도, 오디오 파일도 없습니다.**
 나무·바위·몬스터·보스·건축물·아이템 아이콘·지형·효과음까지 전부 실행 시점에 GDScript 로 생성합니다.
-(포함된 바이너리는 한글 폰트 3개뿐 — 나눔글꼴, SIL OFL)
+지면·소재 텍스처 11종(잔디·흙·바위·눈·모래·나무껍질·판자·석조·직물·금속·잿불)만
+[ambientCG](https://ambientcg.com/) 의 CC0 실측 소스를 64px 근백색 그레이스케일로 가공해
+`assets/textures/` 에 넣고 씁니다. 파일이 없는 종류(털·초가·잎)는 기존 절차적 생성으로 대체합니다.
+(그 외 포함된 바이너리는 한글 폰트 3개뿐 — 나눔글꼴, SIL OFL)
 
 ---
 
@@ -253,5 +256,6 @@ scripts/
 ## 라이선스
 
 - 코드: [MIT](LICENSE)
+- 텍스처: [ambientCG](https://ambientcg.com/) — CC0 (Grass001, Ground103, Rock058, Snow010A, Ground093C, Bark012, Planks030A, Bricks097, Fabric061, Metal055A, Gravel024)
 - 폰트: 나눔글꼴 (SIL Open Font License 1.1) — `assets/fonts/`
 - Valheim 은 Iron Gate AB 의 상표입니다. 이 프로젝트는 비공식 팬 오마주이며 어떠한 제휴 관계도 없습니다.

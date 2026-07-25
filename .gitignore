@@ -22,3 +22,4 @@ Thumbs.db
 # 실행 중 생성되는 사용자 데이터
 saves/
 shots/
+.tools/
