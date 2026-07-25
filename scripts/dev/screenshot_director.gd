@@ -52,12 +52,24 @@ func _shot(tag: String) -> void:
 	img.save_png(path)
 	print("[SHOT] ", path)
 
-## 특정 바이옴의 보기 좋은 지점 찾기
+## 특정 바이옴의 보기 좋은 지점 찾기.
+## 1차는 "사방 260m 가 육지"인 내륙 지점만 노린다(바다가 화면을 덮지 않게).
+## 산악/늪처럼 해안에만 있는 바이옴은 1차에서 못 찾으므로 조건을 풀어 2차를 돈다.
 func _find(biome: int, prefer_high: bool = false) -> Vector3:
+	var p1 := _find_pass(biome, prefer_high, true)
+	if p1 != Vector3.INF:
+		return p1
+	var p2 := _find_pass(biome, prefer_high, false)
+	if p2 != Vector3.INF:
+		return p2
+	var gen := GameState.gen
+	return Vector3(0, gen.height(0, 0), 0)
+
+func _find_pass(biome: int, prefer_high: bool, strict: bool) -> Vector3:
 	var gen := GameState.gen
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260725 + biome
-	var best := Vector3.ZERO
+	var best := Vector3.INF
 	var best_score := -1e9
 	for i in range(4000):
 		var a := rng.randf() * TAU
@@ -65,13 +77,11 @@ func _find(biome: int, prefer_high: bool = false) -> Vector3:
 		var x := cos(a) * d
 		var z := sin(a) * d
 		var h := gen.height(x, z)
-		# 해안선에 붙으면 화면 절반이 바다가 된다 — 충분히 내륙/고지대만 고른다
-		if h < Const.WATER_LEVEL + 8.0:
+		if h < Const.WATER_LEVEL + (8.0 if strict else 1.5):
 			continue
 		if gen.biome_from(x, z, h) != biome:
 			continue
-		# 주변 반경 70m 가 전부 육지여야 한다 — 해안 절벽에서 찍으면
-		# 화면 절반이 바다 반사로 하얗게 뜬다
+		# 주변이 얼마나 같은 바이옴 육지인지 센다
 		var inland := true
 		var same := 0
 		for j in range(12):
@@ -82,21 +92,19 @@ func _find(biome: int, prefer_high: bool = false) -> Vector3:
 			var sh := gen.height(sx, sz)
 			if sh < Const.WATER_LEVEL + 6.0:
 				inland = false
-				break
 			if gen.biome_from(sx, sz, sh) == biome:
 				same += 1
-		if not inland or same < 7:
+		if strict and (not inland or same < 7):
 			continue
-		# 완전 평지보다 완만한 기복이 있는 곳이 보기 좋다
 		var sl := gen.slope_at(x, z)
 		var score := -absf(sl - 0.12) * 24.0 + float(same) * 2.0
+		if not strict and inland:
+			score += 6.0
 		if prefer_high:
 			score += h * 0.15
 		if score > best_score:
 			best_score = score
 			best = Vector3(x, h, z)
-	if best == Vector3.ZERO:
-		best = Vector3(0, gen.height(0, 0), 0)
 	return best
 
 func _goto(pos: Vector3, yaw: float = 0.7, pitch: float = -0.12,

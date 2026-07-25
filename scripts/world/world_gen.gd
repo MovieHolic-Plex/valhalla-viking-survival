@@ -251,10 +251,14 @@ func ground_color(x: float, z: float, h: float, biome: int) -> Color:
 		# 그늘진 부분 — 어둡고 푸르게
 		c = c.lerp(Color(c.r * 0.62, c.g * 0.74, c.b * 0.80), -macro * 0.50)
 
-	# 해안선 모래
-	if biome != Const.Biome.MOUNTAIN and h < Const.WATER_LEVEL + 1.6:
-		var t := clampf((Const.WATER_LEVEL + 1.6 - h) / 2.4, 0.0, 1.0)
-		c = c.lerp(Color(0.50, 0.44, 0.31), t * 0.92)
+	# 해안선 모래 — 물속 얕은 바닥까지 이어져야 물가가 시커먼 띠로 보이지 않는다
+	if biome != Const.Biome.MOUNTAIN and h < Const.WATER_LEVEL + 1.8:
+		var t := clampf((Const.WATER_LEVEL + 1.8 - h) / 2.6, 0.0, 1.0)
+		c = c.lerp(Color(0.52, 0.46, 0.33), t * 0.94)
+		# 더 깊어지면 서서히 어두운 뻘색으로
+		if h < Const.WATER_LEVEL - 3.0:
+			var t2 := clampf((Const.WATER_LEVEL - 3.0 - h) / 14.0, 0.0, 1.0)
+			c = c.lerp(Color(0.26, 0.25, 0.20), t2)
 	# 눈은 설산 바이옴에서만 — 그 외 고지대는 바위색으로 살짝 바랜다
 	if biome == Const.Biome.MOUNTAIN:
 		var t2 := clampf((h - (Const.WATER_LEVEL + 46.0)) / 22.0, 0.0, 1.0)

@@ -133,7 +133,7 @@ const WATER_SHADER := """
 shader_type spatial;
 render_mode cull_disabled, diffuse_lambert, specular_schlick_ggx;
 
-uniform vec4 shallow : source_color = vec4(0.105, 0.245, 0.255, 1.0);
+uniform vec4 shallow : source_color = vec4(0.135, 0.290, 0.290, 1.0);
 uniform vec4 deep : source_color = vec4(0.012, 0.038, 0.062, 1.0);
 uniform vec3 sun_dir = vec3(0.0, -1.0, 0.0);
 uniform vec3 sun_col : source_color = vec3(1.0, 0.94, 0.82);
@@ -176,15 +176,15 @@ void fragment() {
 	float scene_z = -(upos.z / upos.w);
 	float water_z = -VERTEX.z;
 	float dist = max(scene_z - water_z, 0.0);
-	float d = clamp(dist / 14.0, 0.0, 1.0);
+	float d = clamp(dist / 26.0, 0.0, 1.0);
 
 	vec3 col = mix(shallow.rgb, deep.rgb, d);
 
 	// 얕은 곳은 바닥이 비쳐 보인다(간이 굴절)
 	vec2 refr = NORMAL.xz * 0.022 * (1.0 - d);
 	vec3 behind = texture(screen_tex, SCREEN_UV + refr).rgb;
-	float clarity = 1.0 - clamp(dist / 5.0, 0.0, 1.0);
-	col = mix(col, behind * mix(vec3(0.75, 0.92, 0.90), vec3(1.0), clarity), clarity * 0.7);
+	float clarity = 1.0 - clamp(dist / 10.0, 0.0, 1.0);
+	col = mix(col, behind * mix(vec3(0.72, 0.90, 0.88), vec3(1.0), clarity), clarity * 0.80);
 
 	// 해안선 거품 + 물마루 거품. 파도에 맞춰 해안 거품이 밀려왔다 빠진다.
 	float tide = sin(TIME * 0.55 + v_world.x * 0.12 + v_world.z * 0.09) * 0.45 + 0.55;
