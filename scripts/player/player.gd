@@ -1,1015 +1,702 @@
-class_name Player
 extends CharacterBody3D
-## 플레이어: 이동 · 수영 · 전투 · 채집 · 상호작용.
 
-signal interact_target_changed(node)
-signal notify(text: String)
+signal inventory_changed
+signal stats_changed
+signal selection_changed(slot: int)
 
-const WALK := 3.6
-const RUN := 6.4
-const CROUCH := 1.7
-const SWIM := 2.6
-const JUMP_V := 7.2
-const ACCEL := 12.0
-const AIR_ACCEL := 2.5
-const MOUSE_SENS := 0.0026
-const INTERACT_RANGE := 4.5
-const PICKUP_RANGE := 2.1
+const BARBARIAN_PATH := "res://assets/models/Barbarian.glb"
+const ITEM_NAMES := {
+	"branch": "가지",
+	"stone": "돌",
+	"wood": "목재",
+	"mushroom": "붉은버섯",
+	"berry": "산딸기",
+	"meat": "훈제고기",
+	"trophy": "뿔 파편",
+	"stone_axe": "돌도끼",
+	"hammer": "망치",
+}
+const HOTBAR := ["stone_axe", "hammer", "mushroom", "meat", "trophy"]
+const FOOD_DATA := {
+	"mushroom": {"hp": 15.0, "stamina": 18.0, "duration": 240.0, "color": Color(0.70, 0.23, 0.18)},
+	"berry": {"hp": 10.0, "stamina": 22.0, "duration": 210.0, "color": Color(0.55, 0.20, 0.34)},
+	"meat": {"hp": 32.0, "stamina": 12.0, "duration": 300.0, "color": Color(0.68, 0.38, 0.22)},
+}
 
-var inventory: Inventory
-var stats: PlayerStats
-var anim  # RigAnimator(코드 리그) 또는 GlbRig(GLB 리그) — 같은 인터페이스
+var game: Node
+var inventory: Dictionary = {"berry": 2}
+var food_slots: Array[Dictionary] = []
+var selected_slot := 0
+var hp := 25.0
+var max_hp := 25.0
+var stamina := 50.0
+var max_stamina := 50.0
+var input_enabled := true
+var blocking := false
+var dodge_time := 0.0
+var invulnerable_time := 0.0
+var attack_cooldown := 0.0
+var stamina_regen_delay := 0.0
+var camera_yaw := 0.0
+var camera_pitch := -0.18
+var camera_shake := 0.0
+var food_ui_tick := 0.0
+var heal_tick := 0.0
+var spawn_point := Vector3.ZERO
+var active_model: Node3D
+var hand_item: Node3D
+var character_animator: AnimationPlayer
+var character_clips: Dictionary = {}
+var current_character_clip: StringName = &""
+var character_visual_mode := "procedural_fallback"
+var attack_animation_active := false
+var glb_idle_started := false
 
-var rig: Node3D
-var yaw_pivot: Node3D
-var spring: SpringArm3D
-var cam: Camera3D
-var hand_r: Node3D
-var hand_l: Node3D
-var _weapon_mi: MeshInstance3D
-var _shield_mi: MeshInstance3D
-var _torch_light: OmniLight3D
-var _torch_fx: GPUParticles3D
+@onready var visual_root: Node3D = $VisualRoot
+@onready var fallback_body: MeshInstance3D = $VisualRoot/FallbackBody
+@onready var camera_pivot: Node3D = $CameraPivot
+@onready var spring_arm: SpringArm3D = $CameraPivot/SpringArm3D
+@onready var camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
+@onready var aim_ray: RayCast3D = $CameraPivot/SpringArm3D/Camera3D/AimRay
 
-var yaw := 0.0
-var pitch := -0.18
-var zoom := 4.2
-
-var is_swimming := false
-var is_crouching := false
-var is_blocking := false
-var _block_time := 0.0
-var _attack_cd := 0.0
-var _attack_pending := 0.0
-var _pending_hit := false
-var _dodge_time := 0.0
-var _iframes := 0.0
-var _bow_charge := 0.0
-var _bow_drawing := false
-var _foot_acc := 0.0
-var _hit_ids: Array = []
-var _interact_node: Node = null
-var _last_pos := Vector3.ZERO
-var _wet_timer := 0.0
-var _near_fire := false
-var _comfort := 0
-var _rested_timer := 0.0
-var _biome_check := 0.0
-var _build_system = null
-var input_locked := false
-var _cam_shake := 0.0
-var _sit := false
-var terrain_mode := 0            # 0 평탄화 · 1 융기 · 2 굴착
-var _bobber: Bobber = null
-var _cast_charge := 0.0
-const TERRAIN_MODE_KEY := ["MSG_HOE_LEVEL", "MSG_HOE_RAISE", "MSG_HOE_DIG"]
 
 func _ready() -> void:
-	add_to_group("player")
-	collision_layer = Const.L_PLAYER
-	collision_mask = Const.L_WORLD | Const.L_BUILDING
-	floor_max_angle = deg_to_rad(50.0)
-	floor_snap_length = 0.4
+	_build_character_visual()
+	camera_pivot.rotation = Vector3(camera_pitch, camera_yaw, 0)
 
-	var shape := CollisionShape3D.new()
-	var cap := CapsuleShape3D.new()
-	cap.radius = 0.34
-	cap.height = 1.75
-	shape.shape = cap
-	shape.position = Vector3(0, 0.88, 0)
-	add_child(shape)
 
-	inventory = Inventory.new()
-	stats = PlayerStats.new()
-	stats.died.connect(_on_died)
+func setup(owner_game: Node, start_position: Vector3) -> void:
+	game = owner_game
+	spawn_point = start_position
+	global_position = start_position
+	hp = max_hp
+	stamina = max_stamina
+	inventory_changed.emit()
+	stats_changed.emit()
+	selection_changed.emit(selected_slot)
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-	# 실제 리깅 모델(KayKit CC0 Barbarian)이 있으면 그것을 쓰고,
-	# 없으면 코드 생성 스켈레탈 리그(팔꿈치/무릎이 실제로 접힌다)로 대체한다
-	rig = GlbRig.create()
-	if rig != null:
-		add_child(rig)
-		anim = rig
-		hand_r = rig.hand_r
-		hand_l = rig.hand_l
-	else:
-		rig = MeshFactory.humanoid_skeletal({
-			"skin": Color(0.80, 0.64, 0.52), "cloth": Color(0.45, 0.36, 0.26),
-			"hair": Color(0.48, 0.32, 0.16), "height": 1.8, "beard": true,
-		})
-		add_child(rig)
-		anim = RigAnimator.new(rig)
-		hand_r = rig.get_node_or_null("skel/hand_r")
-		hand_l = rig.get_node_or_null("skel/hand_l")
-
-	# 카메라 리그
-	yaw_pivot = Node3D.new()
-	yaw_pivot.name = "yaw"
-	yaw_pivot.position = Vector3(0, 1.55, 0)
-	add_child(yaw_pivot)
-	spring = SpringArm3D.new()
-	spring.spring_length = zoom
-	spring.margin = 0.35
-	spring.collision_mask = Const.L_WORLD | Const.L_BUILDING
-	yaw_pivot.add_child(spring)
-	cam = Camera3D.new()
-	cam.current = true
-	cam.fov = 72.0
-	cam.far = 2200.0
-	cam.near = 0.12
-	spring.add_child(cam)
-
-	inventory.equipment_changed.connect(_refresh_equipment)
-	inventory.changed.connect(_on_inventory_changed)
-	GameState.player = self
-	_last_pos = global_position
-
-	# 시작 장비
-	inventory.add_item("club", 1)
-	inventory.add_item("wood", 10)
-	inventory.add_item("stone", 6)
-	inventory.add_item("raspberries", 5)
-	_refresh_equipment()
-
-func set_build_system(bs) -> void:
-	_build_system = bs
-
-func get_inventory() -> Inventory:
-	return inventory
-
-# ═══════════════════════════════════════════════ 입력
-func _unhandled_input(event: InputEvent) -> void:
-	if input_locked or stats.is_dead:
-		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		yaw -= event.relative.x * MOUSE_SENS
-		pitch = clampf(pitch - event.relative.y * MOUSE_SENS, -1.30, 0.95)
-	elif event.is_action_pressed("zoom_in"):
-		zoom = clampf(zoom - 0.5, 0.0, 9.0)
-	elif event.is_action_pressed("zoom_out"):
-		zoom = clampf(zoom + 0.5, 0.0, 9.0)
-	elif event.is_action_pressed("interact"):
-		_do_interact()
-	elif event.is_action_pressed("dodge"):
-		_do_dodge()
-	elif event.is_action_pressed("sit"):
-		_sit = not _sit
-	elif event.is_action_pressed("rotate_piece"):
-		var rid := inventory.equipped_id(Inventory.SLOT_RIGHT)
-		if ItemDB.get_item(rid).get("use", "") == "terrain":
-			terrain_mode = (terrain_mode + 1) % 3
-			GameState.msg(tr(TERRAIN_MODE_KEY[terrain_mode]))
-			Sfx.play("click", -16.0)
 
 func _physics_process(delta: float) -> void:
-	if stats.is_dead:
-		velocity = Vector3.ZERO
-		anim.update(delta, 0.0, false, false, true)
+	if game == null:
+		return
+	attack_cooldown = maxf(0.0, attack_cooldown - delta)
+	dodge_time = maxf(0.0, dodge_time - delta)
+	invulnerable_time = maxf(0.0, invulnerable_time - delta)
+	stamina_regen_delay = maxf(0.0, stamina_regen_delay - delta)
+	camera_shake = maxf(0.0, camera_shake - delta * 1.8)
+	_update_camera_shake()
+	_update_food(delta)
+
+	if not is_on_floor():
+		velocity.y -= float(ProjectSettings.get_setting("physics/3d/default_gravity", 22.0)) * delta
+	else:
+		velocity.y = maxf(velocity.y, -0.5)
+
+	if not input_enabled or game.ui_open:
+		blocking = false
+		velocity.x = move_toward(velocity.x, 0.0, 18.0 * delta)
+		velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
+		move_and_slide()
+		_update_character_animation(Vector2(velocity.x, velocity.z).length())
+		_update_prompt("")
 		return
 
-	_update_timers(delta)
-	_update_camera(delta)
-	_update_environment(delta)
+	if Input.is_action_just_pressed("interact") and not game.building_system.active:
+		_try_interact()
+	if Input.is_action_just_pressed("save_game"):
+		game.save_system.save_game()
+	if Input.is_action_just_pressed("load_game"):
+		game.save_system.load_game()
+	for index in range(5):
+		if Input.is_action_just_pressed("hotbar_%d" % (index + 1)):
+			select_slot(index)
 
-	var moving_speed := _move(delta)
-	stats.update(delta, moving_speed > 0.5)
+	blocking = Input.is_action_pressed("block") and not game.building_system.active
+	var input_vector := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var camera_right := camera.global_transform.basis.x
+	camera_right.y = 0.0
+	camera_right = camera_right.normalized()
+	var camera_forward := -camera.global_transform.basis.z
+	camera_forward.y = 0.0
+	camera_forward = camera_forward.normalized()
+	var move_direction := (camera_right * input_vector.x + camera_forward * -input_vector.y).normalized()
 
-	_update_combat(delta)
-	_update_interaction()
-	_auto_pickup()
+	if Input.is_action_just_pressed("dodge") and dodge_time <= 0.0 and stamina >= 18.0 and not game.building_system.active:
+		spend_stamina(18.0)
+		dodge_time = 0.44
+		invulnerable_time = 0.34
+		if move_direction.length_squared() < 0.1:
+			move_direction = -visual_root.global_transform.basis.z
+		velocity.x = move_direction.x * 10.5
+		velocity.z = move_direction.z * 10.5
+		game.notify("회피", Color(0.69, 0.83, 0.82), 0.5)
+	elif dodge_time <= 0.0:
+		var sprinting := Input.is_action_pressed("sprint") and move_direction.length_squared() > 0.1 and stamina > 0.5
+		var speed := 7.1 if sprinting else 4.4
+		if blocking:
+			speed *= 0.55
+		var target_velocity := move_direction * speed
+		velocity.x = move_toward(velocity.x, target_velocity.x, 22.0 * delta)
+		velocity.z = move_toward(velocity.z, target_velocity.z, 22.0 * delta)
+		if sprinting:
+			spend_stamina(13.5 * delta)
+		if Input.is_action_just_pressed("jump") and is_on_floor() and stamina >= 9.0 and not game.building_system.active:
+			spend_stamina(9.0)
+			velocity.y = 7.6
 
-	var sp01: float = clampf(moving_speed / RUN, 0.0, 1.0)
-	anim.set_block(is_blocking, delta)
-	anim.update(delta, sp01, not is_on_floor() and not is_swimming, is_swimming)
+	if stamina_regen_delay <= 0.0 and not blocking and not Input.is_action_pressed("sprint"):
+		stamina = minf(max_stamina, stamina + (16.0 + float(food_slots.size()) * 1.5) * delta)
 
-	# 이동 거리 통계
-	var d := global_position.distance_to(_last_pos)
-	if d < 20.0:
-		GameState.stats["distance"] = float(GameState.stats["distance"]) + d
-	_last_pos = global_position
-
-func _update_timers(delta: float) -> void:
-	if _attack_cd > 0.0:
-		_attack_cd -= delta
-	if _iframes > 0.0:
-		_iframes -= delta
-	if _dodge_time > 0.0:
-		_dodge_time -= delta
-	if _block_time > 0.0:
-		_block_time -= delta
-	if _cam_shake > 0.0:
-		_cam_shake = maxf(0.0, _cam_shake - delta * 3.0)
-	if _pending_hit and _attack_pending > 0.0:
-		_attack_pending -= delta
-		if _attack_pending <= 0.0:
-			_pending_hit = false
-			_resolve_melee()
-
-# ═══════════════════════════════════════════════ 이동
-func _move(delta: float) -> float:
-	# 배에 타고 있으면 조종은 배가 맡는다
-	if has_meta("boat"):
-		var b = get_meta("boat")
-		if b != null and is_instance_valid(b):
-			velocity = Vector3.ZERO
-			is_swimming = false
-			return 0.0
-		remove_meta("boat")
-
-	var input := Vector2.ZERO
-	if not input_locked:
-		input.x = Input.get_axis("move_left", "move_right")
-		input.y = Input.get_axis("move_forward", "move_back")
-	if input.length() > 1.0:
-		input = input.normalized()
-	if input.length_squared() > 0.01:
-		_sit = false
-
-	var basis_yaw := Basis(Vector3.UP, yaw)
-	var wish := basis_yaw * Vector3(input.x, 0, input.y)
-	if wish.length() > 0.001:
-		wish = wish.normalized()
-
-	# 던전은 해수면보다 훨씬 아래 좌표에 있으므로 물 판정에서 제외한다
-	var in_dungeon := has_meta("in_dungeon")
-	var depth := -100.0 if in_dungeon else Const.WATER_LEVEL - global_position.y
-	is_swimming = depth > 1.25
-
-	var target_speed := WALK
-	var sprinting := false
-	if is_swimming:
-		target_speed = SWIM
-		if Input.is_action_pressed("sprint") and stats.has_stamina(1.0):
-			target_speed = SWIM * 1.45
-	elif is_crouching:
-		target_speed = CROUCH
-	elif Input.is_action_pressed("sprint") and not input_locked and wish.length() > 0.1 \
-			and not is_blocking:
-		if stats.use_stamina(Const.SPRINT_DRAIN * delta):
-			target_speed = RUN
-			sprinting = true
-			stats.raise_skill(Const.Skill.RUN, delta * 0.25)
-	if is_blocking:
-		target_speed *= 0.55
-	if _sit:
-		target_speed = 0.0
-
-	# 장비 무게 / 과적
-	target_speed *= 1.0 + inventory.move_speed_mod()
-	if inventory.is_overweight():
-		target_speed *= 0.35
-	if stats.has_status("freezing"):
-		target_speed *= 0.75
-	if GameState.power_is_active("yagluth"):
-		target_speed *= 1.15
-	# 무릎 깊이의 물은 감속
-	if not is_swimming and depth > 0.2:
-		target_speed *= lerpf(1.0, 0.55, clampf(depth / 1.25, 0.0, 1.0))
-	# 가파른 경사 감속
-	if is_on_floor():
-		var fn := get_floor_normal()
-		target_speed *= lerpf(1.0, 0.45, clampf((1.0 - fn.y) / 0.45, 0.0, 1.0))
-
-	if is_swimming:
-		_swim_move(delta, wish, target_speed)
-	else:
-		_ground_move(delta, wish, target_speed, sprinting)
+	if Input.is_action_just_pressed("attack") and not game.building_system.active:
+		_attack()
 
 	move_and_slide()
+	if move_direction.length_squared() > 0.05 and dodge_time <= 0.0:
+		var target_angle := atan2(-move_direction.x, -move_direction.z)
+		visual_root.rotation.y = lerp_angle(visual_root.rotation.y, target_angle, minf(1.0, delta * 12.0))
+	var horizontal_speed := Vector2(velocity.x, velocity.z).length()
+	visual_root.position.y = sin(Time.get_ticks_msec() * 0.012) * minf(horizontal_speed * 0.006, 0.035)
+	_update_character_animation(horizontal_speed)
+	_update_prompt(_current_prompt())
+	stats_changed.emit()
 
-	# 발소리
-	var hspeed := Vector3(velocity.x, 0, velocity.z).length()
-	if is_on_floor() and hspeed > 1.0 and not is_swimming:
-		_foot_acc += delta * hspeed
-		if _foot_acc > 3.4:
-			_foot_acc = 0.0
-			Sfx.play_at("footstep", global_position, get_tree().current_scene, -18.0,
-				randf_range(0.85, 1.15))
-	return hspeed
 
-func _ground_move(delta: float, wish: Vector3, speed: float, sprinting: bool) -> void:
-	if _dodge_time > 0.0:
-		# 구르는 동안은 관성 유지
-		velocity.y -= 22.0 * delta
-		return
-	var accel := ACCEL if is_on_floor() else AIR_ACCEL
-	var target := wish * speed
-	velocity.x = move_toward(velocity.x, target.x, accel * delta * maxf(speed, 1.0))
-	velocity.z = move_toward(velocity.z, target.z, accel * delta * maxf(speed, 1.0))
-	if is_on_floor():
-		velocity.y = -1.0
-		if Input.is_action_just_pressed("jump") and not input_locked and not _sit:
-			var cost := Const.JUMP_COST
-			if GameState.power_is_active("eikthyr"):
-				cost *= 0.4
-			if stats.use_stamina(cost):
-				velocity.y = JUMP_V
-				Sfx.play_at("jump", global_position, get_tree().current_scene, -14.0)
-				stats.raise_skill(Const.Skill.JUMP, 0.35)
-	else:
-		velocity.y -= 22.0 * delta
-		velocity.y = maxf(velocity.y, -55.0)
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and input_enabled and (game == null or not game.ui_open):
+		var motion := event as InputEventMouseMotion
+		camera_yaw -= motion.relative.x * 0.0024
+		camera_pitch = clampf(camera_pitch - motion.relative.y * 0.0022, -1.05, 0.45)
+		camera_pivot.rotation = Vector3(camera_pitch, camera_yaw, 0)
+	elif event.is_action_pressed("zoom_in"):
+		spring_arm.spring_length = maxf(2.8, spring_arm.spring_length - 0.45)
+	elif event.is_action_pressed("zoom_out"):
+		spring_arm.spring_length = minf(7.0, spring_arm.spring_length + 0.45)
 
-	is_crouching = Input.is_action_pressed("crouch") and is_on_floor() and not input_locked
-	if is_crouching:
-		stats.raise_skill(Const.Skill.SNEAK, delta * 0.12)
 
-func _swim_move(delta: float, wish: Vector3, speed: float) -> void:
-	var target := wish * speed
-	velocity.x = move_toward(velocity.x, target.x, 6.0 * delta * speed)
-	velocity.z = move_toward(velocity.z, target.z, 6.0 * delta * speed)
-	# 수면으로 떠오르기 / 잠수
-	var surface := Const.WATER_LEVEL - 0.9
-	var dy := surface - global_position.y
-	velocity.y = clampf(dy * 3.0, -3.0, 3.0)
-	if Input.is_action_pressed("jump"):
-		velocity.y = 2.5
-	if Input.is_action_pressed("crouch"):
-		velocity.y = -2.5
-	if not stats.use_stamina(Const.SWIM_DRAIN * delta):
-		# 스태미나가 바닥나면 가라앉으며 익사 피해
-		velocity.y = -1.2
-		stats.set_hp(stats.hp - 6.0 * delta)
-	else:
-		stats.raise_skill(Const.Skill.SWIM, delta * 0.2)
-
-# ═══════════════════════════════════════════════ 카메라
-func _update_camera(delta: float) -> void:
-	yaw_pivot.rotation.y = yaw
-	spring.rotation.x = pitch
-	spring.spring_length = lerpf(spring.spring_length, zoom, delta * 10.0)
-	# 1인칭에 가까우면 몸을 숨긴다
-	rig.visible = spring.spring_length > 0.8
-	# 몸통은 카메라 방향을 따라간다
-	rig.rotation.y = lerp_angle(rig.rotation.y, 0.0, delta * 12.0)
-	rotation.y = yaw
-	if _cam_shake > 0.0:
-		cam.h_offset = randf_range(-0.06, 0.06) * _cam_shake
-		cam.v_offset = randf_range(-0.06, 0.06) * _cam_shake
-	else:
-		cam.h_offset = 0.0
-		cam.v_offset = 0.0
-
-func shake(amount: float) -> void:
-	_cam_shake = maxf(_cam_shake, amount)
-
-# ═══════════════════════════════════════════════ 환경
-func _update_environment(delta: float) -> void:
-	# 던전 안에서는 날씨·바이옴 판정을 멈춘다
-	if has_meta("in_dungeon"):
-		stats.remove_status("freezing")
-		stats.remove_status("wet")
-		_update_comfort(delta)
-		return
-
-	_biome_check -= delta
-	if _biome_check <= 0.0:
-		_biome_check = 0.5
-		GameState.set_biome(GameState.biome_at(global_position.x, global_position.z))
-		_update_map_discovery()
-
-	# 젖음 / 추위
-	var depth := Const.WATER_LEVEL - global_position.y
-	var raining := false
-	var sky = get_tree().current_scene.get_node_or_null("sky")
-	if sky != null:
-		raining = sky.weather in ["rain", "storm"]
-	if depth > 0.2 or raining:
-		_wet_timer = 60.0
-	if _wet_timer > 0.0:
-		_wet_timer -= delta
-		stats.add_status("wet", 2.0)
-	else:
-		stats.remove_status("wet")
-
-	var b := GameState.current_biome
-	var cold := b == Const.Biome.MOUNTAIN or (GameState.is_night() and stats.has_status("wet"))
-	var res := inventory.resistances()
-	if cold and float(res.get("res_frost", 0.0)) < 0.5 and not _near_fire:
-		if b == Const.Biome.MOUNTAIN:
-			stats.add_status("freezing", 2.0, {"dps": 2.0, "nonlethal": false})
+func select_slot(index: int) -> void:
+	selected_slot = clampi(index, 0, HOTBAR.size() - 1)
+	var item: String = HOTBAR[selected_slot]
+	if item in FOOD_DATA:
+		eat_food(item)
+	elif item == "hammer":
+		if item_count("hammer") > 0:
+			game.building_system.enter()
 		else:
-			stats.add_status("cold", 2.0)
+			game.notify("먼저 제작 패널에서 망치를 만드세요.", Color(0.94, 0.68, 0.35))
+	elif game != null and game.building_system.active:
+		game.building_system.exit()
+	_update_hand_item()
+	selection_changed.emit(selected_slot)
+
+
+func _attack() -> void:
+	if attack_cooldown > 0.0:
+		return
+	var tool := "stone_axe" if selected_slot == 0 and item_count("stone_axe") > 0 else "fists"
+	var cost := 11.0 if tool == "stone_axe" else 6.0
+	if stamina < cost:
+		game.notify("기력이 부족합니다.", Color(0.92, 0.55, 0.34), 0.7)
+		return
+	spend_stamina(cost)
+	attack_cooldown = 0.58
+	_play_attack_animation()
+	var target: Object
+	aim_ray.force_raycast_update()
+	if aim_ray.is_colliding():
+		target = aim_ray.get_collider()
+	if target == null or not target.has_method("take_hit"):
+		target = game.find_attack_target(global_position, -visual_root.global_transform.basis.z, 3.2)
+	var damage := 21.0 if tool == "stone_axe" else 7.0
+	if target != null and target.has_method("take_hit"):
+		target.take_hit(damage, tool, self)
 	else:
-		stats.remove_status("freezing")
-		stats.remove_status("cold")
+		game.feedback.burst(global_position + -visual_root.global_transform.basis.z * 1.4, Color(0.66, 0.70, 0.66, 0.35), 0.45)
+	_swing_visual()
 
-	if b == Const.Biome.ASHLANDS and float(res.get("res_fire", 0.0)) < 0.5:
-		stats.add_status("burning", 2.0, {"dps": 1.0, "nonlethal": true})
 
-	# 안락도 → 휴식 버프
-	_update_comfort(delta)
+func _try_interact() -> void:
+	var target: Object
+	aim_ray.force_raycast_update()
+	if aim_ray.is_colliding():
+		target = aim_ray.get_collider()
+	if target == null or not target.has_method("interact"):
+		target = game.find_interactable(global_position, 3.4)
+	if target != null and target.has_method("interact"):
+		target.interact(self)
 
-func _update_comfort(delta: float) -> void:
-	_rested_timer -= delta
-	if _rested_timer > 0.0:
+
+func _current_prompt() -> String:
+	if game == null or game.building_system.active:
+		return ""
+	var target: Object
+	aim_ray.force_raycast_update()
+	if aim_ray.is_colliding():
+		target = aim_ray.get_collider()
+	if target == null or not target.has_method("get_prompt"):
+		target = game.find_interactable(global_position, 3.4)
+	if target != null and target.has_method("get_prompt"):
+		return str(target.get_prompt())
+	return ""
+
+
+func add_item(item: String, count: int = 1) -> void:
+	inventory[item] = item_count(item) + count
+	inventory_changed.emit()
+
+
+func remove_item(item: String, count: int = 1) -> bool:
+	if item_count(item) < count:
+		return false
+	inventory[item] = item_count(item) - count
+	if int(inventory[item]) <= 0:
+		inventory.erase(item)
+	inventory_changed.emit()
+	return true
+
+
+func has_items(cost: Dictionary) -> bool:
+	for item: String in cost:
+		if item_count(item) < int(cost[item]):
+			return false
+	return true
+
+
+func consume_items(cost: Dictionary) -> bool:
+	if not has_items(cost):
+		return false
+	for item: String in cost:
+		remove_item(item, int(cost[item]))
+	return true
+
+
+func item_count(item: String) -> int:
+	return int(inventory.get(item, 0))
+
+
+func eat_food(item: String) -> void:
+	if item_count(item) <= 0:
+		game.notify("먹을 %s이(가) 없습니다." % ITEM_NAMES.get(item, item), Color(0.92, 0.66, 0.36))
 		return
-	_rested_timer = 1.0
-	var comfort := 0
-	_near_fire = false
-	var seen: Dictionary = {}
-	for n in get_tree().get_nodes_in_group("comfort_source"):
-		if not is_instance_valid(n) or not (n is Node3D):
-			continue
-		if n.global_position.distance_to(global_position) > 10.0:
-			continue
-		var pid: String = n.get_meta("piece_id", "")
-		if pid == "" or seen.has(pid):
-			continue
-		seen[pid] = true
-		comfort += int(n.get_meta("comfort", 0))
-		if bool(n.get_meta("fire", false)):
-			_near_fire = true
-	_comfort = comfort
-	if comfort > 0:
-		stats.add_status("rested", 60.0 + float(comfort) * 60.0, {"comfort": comfort})
-
-func _update_map_discovery() -> void:
-	var tile := Vector2i(int(global_position.x / 32.0), int(global_position.z / 32.0))
-	for dz in range(-6, 7):
-		for dx in range(-6, 7):
-			GameState.discovered[Vector2i(tile.x + dx, tile.y + dz)] = true
-
-# ═══════════════════════════════════════════════ 전투
-func _update_combat(delta: float) -> void:
-	if input_locked:
-		is_blocking = false
-		_bow_drawing = false
-		return
-	var right := inventory.equipped_id(Inventory.SLOT_RIGHT)
-	var item := ItemDB.get_item(right)
-	var is_bow: bool = item.get("bow", false)
-
-	# 방어
-	var want_block := Input.is_action_pressed("block") and not is_bow \
-		and inventory.equipped_id(Inventory.SLOT_LEFT) != ""
-	if want_block and not is_blocking:
-		_block_time = 0.35     # 패링 윈도
-	is_blocking = want_block
-
-	# ── 낚시 ──
-	if bool(item.get("fishing", false)):
-		_update_fishing(delta)
-		return
-	# ── 지팡이 (에이트르 시전) ──
-	if item.has("staff"):
-		if Input.is_action_just_pressed("attack") and _attack_cd <= 0.0:
-			_cast_staff(right, item)
-		return
-
-	if is_bow:
-		if Input.is_action_pressed("attack") and _has_ammo():
-			if not _bow_drawing:
-				_bow_drawing = true
-				_bow_charge = 0.0
-				anim.attack("bow")
-			_bow_charge = minf(_bow_charge + delta * float(item.get("draw", 1.0)), 1.0)
-			if not stats.use_stamina(6.0 * delta):
-				_release_arrow(right, item)
-		elif _bow_drawing:
-			_release_arrow(right, item)
-	else:
-		if Input.is_action_just_pressed("attack") and _attack_cd <= 0.0 and not _sit:
-			if str(item.get("use", "")) == "terrain":
-				_use_terrain_tool()
-			else:
-				_start_melee(right, item)
-
-func _start_melee(id: String, item: Dictionary) -> void:
-	var spd := float(item.get("spd", 1.1)) if not item.is_empty() else 1.4
-	var cost := float(item.get("stam", 8.0)) if not item.is_empty() else 5.0
-	if not stats.use_stamina(cost):
-		Sfx.play("error", -14.0)
-		return
-	_attack_cd = 1.0 / maxf(spd, 0.2)
-	var kind := "slash"
-	var skill := int(item.get("skill", Const.Skill.UNARMED)) if not item.is_empty() \
-		else Const.Skill.UNARMED
-	match skill:
-		Const.Skill.AXES: kind = "chop"
-		Const.Skill.SPEARS: kind = "stab"
-		Const.Skill.CLUBS: kind = "chop"
-		Const.Skill.PICKAXES: kind = "chop"
-	anim.attack(kind)
-	Sfx.play_at("swing", global_position, get_tree().current_scene, -10.0)
-	_hit_ids.clear()
-	_pending_hit = true
-	_attack_pending = _attack_cd * 0.30
-
-func _resolve_melee() -> void:
-	var id := inventory.equipped_id(Inventory.SLOT_RIGHT)
-	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
-	var item := ItemDB.get_item(id)
-	var rng := float(item.get("rng", 1.8)) if not item.is_empty() else 1.6
-	var kb := float(item.get("kb", 20.0)) if not item.is_empty() else 10.0
-	var skill := int(item.get("skill", Const.Skill.UNARMED)) if not item.is_empty() \
-		else Const.Skill.UNARMED
-	var tool_tier := int(item.get("tier", 0))
-	if item.has("mine_tier"):
-		tool_tier = int(item["mine_tier"])
-
-	var dmg: Dictionary = ItemDB.total_damage(id, q) if not item.is_empty() \
-		else {Const.Dmg.BLUNT: 8.0}
-	var mult := Const.skill_damage_mult(stats.skill_level(skill))
-	if GameState.power_is_active("bonemass"):
-		mult *= 1.0
-	var scaled := {}
-	for k in dmg:
-		scaled[k] = float(dmg[k]) * mult
-
-	var origin := global_position + Vector3(0, 1.2, 0)
-	var fwd := -Basis(Vector3.UP, yaw).z
-	var center := origin + fwd * (rng * 0.55)
-
-	var space := get_world_3d().direct_space_state
-	var q_par := PhysicsShapeQueryParameters3D.new()
-	var sph := SphereShape3D.new()
-	sph.radius = maxf(rng * 0.55, 0.7)
-	q_par.shape = sph
-	q_par.transform = Transform3D(Basis.IDENTITY, center)
-	q_par.collision_mask = Const.L_ENEMY | Const.L_RESOURCE
-	q_par.collide_with_areas = false
-	q_par.collide_with_bodies = true
-	var hits := space.intersect_shape(q_par, 12)
-
-	var any := false
-	for h in hits:
-		var col = h["collider"]
-		if col == null or not is_instance_valid(col) or col == self:
-			continue
-		var iid: int = col.get_instance_id()
-		if _hit_ids.has(iid):
-			continue
-		# 등 뒤의 대상은 맞지 않는다
-		var to: Vector3 = (col.global_position - global_position)
-		to.y = 0
-		if to.length() > 0.05 and to.normalized().dot(fwd) < 0.15:
-			continue
-		_hit_ids.append(iid)
-		var hit_point: Vector3 = col.global_position + Vector3(0, 1.0, 0)
-		if col is ResourceNode:
-			var r: Dictionary = col.take_hit(scaled, tool_tier, hit_point, self)
-			if r.get("ok", false):
-				any = true
-				var ws := Const.Skill.WOODCUTTING if col.accept == Const.Dmg.CHOP \
-					else Const.Skill.PICKAXES
-				stats.raise_skill(ws, 0.4)
-				if r.get("killed", false) and col.kind == ResourceNode.Kind.TREE:
-					GameState.stats["trees"] = int(GameState.stats["trees"]) + 1
-		elif col.has_method("take_hit"):
-			col.take_hit(scaled, hit_point, self, kb)
-			any = true
-			Sfx.play_at("flesh_hit", hit_point, get_tree().current_scene, -3.0)
-	if any:
-		stats.raise_skill(skill, 0.7)
-		shake(0.35)
-	elif item.has("mine_tier"):
-		# 바위를 맞히지 못한 곡괭이질은 땅을 판다
-		_dig_terrain()
-
-# ─────────────────────────────────────────── 지형 변형
-func _terrain_aim(max_dist: float) -> Dictionary:
-	var from := cam.global_position
-	var to := from + -cam.global_transform.basis.z * (max_dist + spring.spring_length)
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = Const.L_WORLD
-	q.exclude = [get_rid()]
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
-	if hit.is_empty():
-		return {}
-	if hit["position"].distance_to(global_position) > max_dist:
-		return {}
-	return hit
-
-func _apply_terrain(center: Vector3, radius: float, mode: String,
-		amount: float, cost: float) -> void:
-	if GameState.gen == null:
-		return
-	if not stats.use_stamina(cost):
-		Sfx.play("error", -14.0)
-		return
-	# 온라인이면 호스트가 판정한 뒤 모두에게 적용한다.
-	# 클라이언트는 여기서 로컬 적용을 건너뛰고 승인된 결과를 받는다.
-	if not Net.request_terrain(center, radius, mode, amount):
-		var keys := GameState.gen.modify(center, radius, mode, amount)
-		var cm = get_tree().current_scene.get_node_or_null("chunks")
-		if cm != null:
-			cm.rebuild(keys)
-	Sfx.play_at("build", center, get_tree().current_scene, -6.0, 0.8)
-	Fx.burst(get_tree().current_scene, center + Vector3(0, 0.3, 0),
-		Color(0.52, 0.42, 0.28), 14, 3.0, 0.08, 0.8)
-	anim.attack("chop")
-	_attack_cd = 0.7
-
-func _use_terrain_tool() -> void:
-	var hit := _terrain_aim(6.0)
-	if hit.is_empty():
-		return
-	var p: Vector3 = hit["position"]
-	match terrain_mode:
-		0:
-			# 평탄화 기준 높이는 플레이어 발밑
-			_apply_terrain(Vector3(p.x, global_position.y, p.z), 2.6, "level", 0.0, 12.0)
-		1:
-			_apply_terrain(p, 2.2, "raise", 0.55, 14.0)
-		2:
-			_apply_terrain(p, 2.2, "dig", 0.55, 14.0)
-
-func _dig_terrain() -> void:
-	var hit := _terrain_aim(4.0)
-	if hit.is_empty():
-		return
-	var p: Vector3 = hit["position"]
-	_apply_terrain(p, 1.8, "dig", 0.6, 10.0)
-	# 파낸 흙에서 돌이 조금 나온다
-	if randf() < 0.35:
-		ItemDrop.spawn(get_tree().current_scene, p + Vector3(0, 0.5, 0), "stone",
-			randi_range(1, 2))
-
-# ─────────────────────────────────────────── 낚시
-func _update_fishing(delta: float) -> void:
-	if _bobber != null and is_instance_valid(_bobber):
-		if Input.is_action_just_pressed("attack"):
-			_bobber.try_hook()
-		if Input.is_action_just_pressed("block"):
-			_bobber.queue_free()
-			_bobber = null
-		return
-	if Input.is_action_pressed("attack"):
-		_cast_charge = minf(_cast_charge + delta * 1.4, 1.0)
-		anim.attack("bow")
-	elif _cast_charge > 0.08:
-		_throw_bobber()
-		_cast_charge = 0.0
-
-func _throw_bobber() -> void:
-	if inventory.count("fishing_bait") <= 0:
-		GameState.msg(tr("MSG_NO_BAIT"))
-		Sfx.play("error", -12.0)
-		return
-	inventory.remove_item("fishing_bait", 1)
-	var dir := -cam.global_transform.basis.z.normalized()
-	dir.y += 0.28
-	var b := Bobber.new()
-	get_tree().current_scene.add_child(b)
-	b.launch(global_position + Vector3(0, 1.5, 0) + dir * 1.2,
-		dir.normalized() * lerpf(10.0, 26.0, _cast_charge), self)
-	b.finished.connect(func(_f): _bobber = null)
-	_bobber = b
-	anim.attack("bow")
-	Sfx.play_at("swing", global_position, get_tree().current_scene, -10.0, 1.3)
-
-# ─────────────────────────────────────────── 마법 (에이트르)
-func _cast_staff(id: String, item: Dictionary) -> void:
-	var cost := float(item.get("eitr_cost", 20.0))
-	if stats.max_eitr <= 0.0:
-		GameState.msg(tr("MSG_NO_EITR_FOOD"))
-		Sfx.play("error", -12.0)
-		return
-	if not stats.use_eitr(cost):
-		GameState.msg(tr("MSG_NOT_ENOUGH_EITR"))
-		Sfx.play("error", -12.0)
-		return
-	_attack_cd = 1.0 / maxf(float(item.get("spd", 0.9)), 0.2)
-	anim.attack("stab")
-	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
-	var scene := get_tree().current_scene
-	var col := ItemDB.color_of(id)
-	match str(item.get("staff", "bolt")):
-		"bolt":
-			var dmg := ItemDB.total_damage(id, q)
-			var dir := -cam.global_transform.basis.z.normalized()
-			var pr := Projectile.make(dmg, col, self)
-			scene.add_child(pr)
-			pr.gravity = 0.0
-			pr.knockback = 40.0
-			pr.launch(cam.global_position + dir * 1.2, dir * 42.0)
-			Sfx.play_at("bow_shoot", global_position, scene, -4.0, 0.7)
-		"shield":
-			stats.add_status("magic_shield", 30.0)
-			Fx.burst(scene, global_position + Vector3(0, 1.0, 0), col, 40, 4.0, 0.1, 1.2)
-			Sfx.play("level_up", -8.0, 0.9)
-			GameState.msg(tr("MSG_SHIELD_UP"))
-		"summon":
-			var fwd := -Basis(Vector3.UP, yaw).z
-			for i in range(2):
-				var off := fwd.rotated(Vector3.UP, (float(i) - 0.5) * 0.8) * 3.0
-				var pos := global_position + off
-				pos.y = GameState.height_at(pos.x, pos.z) + 0.4
-				var e := Enemy.spawn("skeleton", scene, pos)
-				if e:
-					e.set_meta("friendly", true)
-					e.add_to_group("tamed")
-			Fx.burst(scene, global_position, col, 30, 4.0, 0.09, 1.0)
-			Sfx.play("portal", -6.0, 0.8)
-			GameState.msg(tr("MSG_SUMMONED"))
-	Fx.burst(scene, hand_r.global_position if hand_r else global_position, col,
-		14, 3.0, 0.07, 0.7)
-
-func _has_ammo() -> bool:
-	return inventory.equipped_id(Inventory.SLOT_AMMO) != ""
-
-func _release_arrow(bow_id: String, item: Dictionary) -> void:
-	_bow_drawing = false
-	var ammo := inventory.equipped_id(Inventory.SLOT_AMMO)
-	if ammo == "" or _bow_charge < 0.15:
-		_bow_charge = 0.0
-		return
-	if not inventory.remove_item(ammo, 1):
-		return
-	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
-	var dmg := ItemDB.total_damage(bow_id, q)
-	var adm: Dictionary = ItemDB.get_item(ammo).get("dmg", {})
-	for k in adm:
-		dmg[k] = float(dmg.get(k, 0.0)) + float(adm[k])
-	var mult := Const.skill_damage_mult(stats.skill_level(Const.Skill.BOWS)) * _bow_charge
-	var scaled := {}
-	for k in dmg:
-		scaled[k] = float(dmg[k]) * mult
-
-	var dir := -cam.global_transform.basis.z.normalized()
-	var origin := cam.global_position + dir * 1.2
-	var arrow := Projectile.make(scaled, ItemDB.color_of(ammo), self)
-	get_tree().current_scene.add_child(arrow)
-	arrow.launch(origin, dir * lerpf(28.0, 58.0, _bow_charge))
-	Sfx.play_at("bow_shoot", global_position, get_tree().current_scene, -6.0)
-	stats.raise_skill(Const.Skill.BOWS, 0.6)
-	_bow_charge = 0.0
-	_attack_cd = 0.35
-
-## 외부(적)에서 호출하는 피격 처리
-func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
-		knockback: float = 0.0) -> void:
-	if stats.is_dead or _iframes > 0.0:
-		return
-	var total := 0.0
-	for k in dmg:
-		total += float(dmg[k])
-
-	# 방어 / 패링
-	var left := inventory.equipped_id(Inventory.SLOT_LEFT)
-	if is_blocking and left != "":
-		var lq := inventory.equipped_quality(Inventory.SLOT_LEFT)
-		var bp := ItemDB.block_of(left, lq)
-		var parry := _block_time > 0.0
-		var eff: float = bp * (float(ItemDB.get_item(left).get("parry", 1.0)) if parry else 1.0)
-		eff *= 1.0 + stats.skill_level(Const.Skill.BLOCK) / Const.SKILL_MAX * 0.5
-		stats.use_stamina(maxf(4.0, total * 0.25))
-		stats.raise_skill(Const.Skill.BLOCK, 0.6)
-		Sfx.play_at("metal_hit", global_position, get_tree().current_scene, -2.0)
-		if eff >= total:
-			Fx.float_text(get_tree().current_scene, global_position + Vector3(0, 1.8, 0),
-				tr("MSG_PARRY") if parry else tr("MSG_BLOCKED"),
-				Color(0.75, 0.9, 1.0), 0.45)
-			if parry and attacker != null and is_instance_valid(attacker) \
-					and attacker.has_method("stagger"):
-				attacker.stagger(3.0)
-			shake(0.4)
+	for food: Dictionary in food_slots:
+		if str(food.get("id", "")) == item:
+			game.notify("같은 음식 효과가 아직 남아 있습니다.", Color(0.88, 0.72, 0.42))
 			return
-		var ratio := 1.0 - eff / maxf(total, 0.001)
-		for k in dmg:
-			dmg[k] = float(dmg[k]) * ratio
-
-	if stats.has_status("magic_shield"):
-		for k in dmg:
-			dmg[k] = float(dmg[k]) * 0.35
-	var taken := stats.take_damage(dmg, inventory.total_armor(), inventory.resistances())
-	if taken > 0.0:
-		anim.hit()
-		shake(clampf(taken / 30.0, 0.2, 1.2))
-		Sfx.play_at("hurt", global_position, get_tree().current_scene, -4.0)
-		Fx.float_text(get_tree().current_scene, global_position + Vector3(0, 1.9, 0),
-			"-" + str(int(round(taken))), Color(1.0, 0.35, 0.35), 0.55)
-		if knockback > 0.0:
-			var kd := global_position - from_pos
-			kd.y = 0
-			if kd.length() > 0.01:
-				velocity += kd.normalized() * clampf(knockback * 0.06, 0.5, 6.0)
-				velocity.y = maxf(velocity.y, 2.0)
-
-func _do_dodge() -> void:
-	if _dodge_time > 0.0 or is_swimming or not is_on_floor():
+	if food_slots.size() >= 3:
+		game.notify("음식 슬롯 3개가 모두 찼습니다.", Color(0.88, 0.72, 0.42))
 		return
-	if not stats.use_stamina(Const.DODGE_COST):
+	remove_item(item, 1)
+	var definition: Dictionary = FOOD_DATA[item]
+	food_slots.append({
+		"id": item,
+		"time": float(definition["duration"]),
+		"duration": float(definition["duration"]),
+		"hp": float(definition["hp"]),
+		"stamina": float(definition["stamina"]),
+		"color": definition["color"],
+	})
+	_recalculate_food_stats()
+	hp = minf(max_hp, hp + 6.0)
+	game.notify("%s을(를) 먹었습니다. 최대 능력치가 증가합니다." % ITEM_NAMES.get(item, item), Color(0.67, 0.86, 0.62))
+
+
+func take_damage(amount: float, _source: Node = null) -> void:
+	if invulnerable_time > 0.0:
 		return
-	var input := Vector2(Input.get_axis("move_left", "move_right"),
-		Input.get_axis("move_forward", "move_back"))
-	var dir := Basis(Vector3.UP, yaw) * Vector3(input.x, 0, input.y if input.y != 0.0 else 1.0)
-	if dir.length() < 0.01:
-		dir = Basis(Vector3.UP, yaw) * Vector3(0, 0, 1)
-	dir = dir.normalized()
-	velocity = dir * 9.5 + Vector3(0, 2.0, 0)
-	_dodge_time = 0.45
-	_iframes = 0.35
-	Sfx.play_at("jump", global_position, get_tree().current_scene, -12.0, 1.3)
+	var final_damage := amount
+	if blocking and stamina >= amount * 0.75:
+		spend_stamina(amount * 0.75)
+		final_damage *= 0.32
+		game.notify("방어 성공", Color(0.60, 0.82, 0.88), 0.65)
+	hp = maxf(0.0, hp - final_damage)
+	game.feedback.player_hurt()
+	game.feedback.hit(global_position + Vector3.UP * 1.8, int(ceil(final_damage)), Color(0.92, 0.28, 0.22), true, false)
+	stats_changed.emit()
+	if hp <= 0.0:
+		_respawn()
 
-func stagger(_t: float) -> void:
-	anim.knock(0.8)
 
-# ═══════════════════════════════════════════════ 상호작용
-func _update_interaction() -> void:
-	var space := get_world_3d().direct_space_state
-	var from := cam.global_position
-	var to := from + -cam.global_transform.basis.z * (INTERACT_RANGE + spring.spring_length)
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.collision_mask = Const.L_RESOURCE | Const.L_BUILDING
-	q.exclude = [get_rid()]
-	var hit := space.intersect_ray(q)
-	var found: Node = null
-	if hit:
-		var col = hit["collider"]
-		if col != null and col.has_method("can_interact") and col.can_interact(self):
-			if col.global_position.distance_to(global_position) <= INTERACT_RANGE + 1.5:
-				found = col
-	if found != _interact_node:
-		_interact_node = found
-		interact_target_changed.emit(found)
+func spend_stamina(amount: float) -> void:
+	stamina = maxf(0.0, stamina - amount)
+	stamina_regen_delay = 0.85
 
-func _do_interact() -> void:
-	# 승선 중이면 먼저 하선
-	if has_meta("boat"):
-		var b = get_meta("boat")
-		if b != null and is_instance_valid(b):
-			b.interact(self)
-			return
-		remove_meta("boat")
-	if _interact_node != null and is_instance_valid(_interact_node):
-		if _interact_node.has_method("interact"):
-			_interact_node.interact(self)
-		return
-	# 손 닿는 거리의 채집물 자동 상호작용
-	for n in get_tree().get_nodes_in_group("interactable"):
-		if not is_instance_valid(n) or not (n is Node3D):
+
+func add_camera_shake(amount: float) -> void:
+	camera_shake = maxf(camera_shake, amount)
+
+
+func export_inventory() -> Dictionary:
+	return inventory.duplicate(true)
+
+
+func import_inventory(data: Dictionary) -> void:
+	inventory.clear()
+	for key: Variant in data:
+		inventory[str(key)] = maxi(0, int(data[key]))
+	inventory_changed.emit()
+	_update_hand_item()
+
+
+func serialize_foods() -> Array:
+	var output: Array = []
+	for food: Dictionary in food_slots:
+		output.append({
+			"id": food.get("id", ""),
+			"time": food.get("time", 0.0),
+		})
+	return output
+
+
+func import_foods(data: Array) -> void:
+	food_slots.clear()
+	for entry: Variant in data:
+		if typeof(entry) != TYPE_DICTIONARY:
 			continue
-		if n.global_position.distance_to(global_position) < 2.4 and n.has_method("interact"):
-			n.interact(self)
-			return
-
-func _auto_pickup() -> void:
-	for d in get_tree().get_nodes_in_group("item_drop"):
-		if not is_instance_valid(d):
+		var food_id := str(entry.get("id", ""))
+		if not FOOD_DATA.has(food_id) or food_slots.size() >= 3:
 			continue
-		if d.global_position.distance_to(global_position) < PICKUP_RANGE:
-			if d.try_pickup(self):
-				notify_pickup(d.item_id, d.amount if d.amount > 0 else 1)
+		var definition: Dictionary = FOOD_DATA[food_id]
+		food_slots.append({
+			"id": food_id,
+			"time": minf(float(entry.get("time", 0.0)), float(definition["duration"])),
+			"duration": float(definition["duration"]),
+			"hp": float(definition["hp"]),
+			"stamina": float(definition["stamina"]),
+			"color": definition["color"],
+		})
+	_recalculate_food_stats()
 
-func notify_pickup(id: String, amount: int) -> void:
-	notify.emit("+%d %s" % [amount, ItemDB.name_of(id)])
-	Sfx.play("pickup", -12.0)
 
-# ═══════════════════════════════════════════════ 장비 표시
-func _on_inventory_changed() -> void:
-	pass
+func _update_food(delta: float) -> void:
+	var changed := false
+	for index in range(food_slots.size() - 1, -1, -1):
+		food_slots[index]["time"] = float(food_slots[index]["time"]) - delta
+		if float(food_slots[index]["time"]) <= 0.0:
+			food_slots.remove_at(index)
+			changed = true
+	if changed:
+		_recalculate_food_stats()
+	food_ui_tick -= delta
+	if food_ui_tick <= 0.0:
+		food_ui_tick = 0.25
+		stats_changed.emit()
+	heal_tick += delta
+	if heal_tick >= 5.0 and not food_slots.is_empty():
+		heal_tick = 0.0
+		hp = minf(max_hp, hp + 1.0 + food_slots.size() * 0.45)
 
-func _refresh_equipment() -> void:
-	if _weapon_mi and is_instance_valid(_weapon_mi):
-		_weapon_mi.queue_free()
-	_weapon_mi = null
-	if _shield_mi and is_instance_valid(_shield_mi):
-		_shield_mi.queue_free()
-	_shield_mi = null
-	if _torch_light and is_instance_valid(_torch_light):
-		_torch_light.queue_free()
-	_torch_light = null
-	if _torch_fx and is_instance_valid(_torch_fx):
-		_torch_fx.queue_free()
-	_torch_fx = null
 
-	var right := inventory.equipped_id(Inventory.SLOT_RIGHT)
-	if right != "" and hand_r:
-		_weapon_mi = _build_held(right)
-		hand_r.add_child(_weapon_mi)
-	var left := inventory.equipped_id(Inventory.SLOT_LEFT)
-	if left != "" and hand_l:
-		_shield_mi = _build_held(left)
-		hand_l.add_child(_shield_mi)
-		if left == "torch":
-			_torch_light = OmniLight3D.new()
-			_torch_light.light_color = Color(1.0, 0.66, 0.32)
-			_torch_light.light_energy = 3.2
-			_torch_light.omni_range = 16.0
-			_torch_light.shadow_enabled = true
-			_torch_light.position = Vector3(0, -0.45, 0)
-			hand_l.add_child(_torch_light)
-			Flicker.attach(_torch_light, 0.30, 1.2)
-			_torch_fx = Fx.fire(hand_l, 0.5)
-			_torch_fx.position = Vector3(0, -0.45, 0)
-	# 방어구 색을 몸통에 반영
-	_tint_armor()
+func _recalculate_food_stats() -> void:
+	max_hp = 25.0
+	max_stamina = 50.0
+	for food: Dictionary in food_slots:
+		var ratio := clampf(float(food["time"]) / maxf(float(food["duration"]), 1.0), 0.0, 1.0)
+		var fade := 0.5 + ratio * 0.5
+		max_hp += float(food["hp"]) * fade
+		max_stamina += float(food["stamina"]) * fade
+	hp = minf(hp, max_hp)
+	stamina = minf(stamina, max_stamina)
+	stats_changed.emit()
 
-func _build_held(id: String) -> MeshInstance3D:
-	var it := ItemDB.get_item(id)
-	var col := ItemDB.color_of(id)
-	var mb := MeshBuilder.new()
-	var t := int(it.get("t", Const.ItemType.MATERIAL))
-	match t:
-		Const.ItemType.SHIELD:
-			mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, -0.15, 0.12)),
-				0.42, 0.42, 0.07, 10, col)
-			mb.sphere(Vector3(0, -0.15, 0.19), 0.10, 7, 4, col.lightened(0.3))
-		Const.ItemType.WEAPON, Const.ItemType.TOOL:
-			if it.get("bow", false):
-				mb.rod(Vector3(0, -0.75, 0), Vector3(0, 0.75, 0.0), 0.035, 5,
-					col.darkened(0.2))
-				mb.rod(Vector3(0, -0.72, 0), Vector3(0, 0.72, -0.16), 0.012, 4,
-					Color(0.9, 0.88, 0.8))
-			elif id == "torch":
-				mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI), Vector3(0, 0.1, 0)),
-					0.035, 0.045, 0.55, 6, Color(0.32, 0.22, 0.14))
-			else:
-				var rr := float(it.get("rng", 2.2))
-				var skill := int(it.get("skill", Const.Skill.SWORDS))
-				var handle := 0.28
-				var blade: float = clampf(rr * 0.42, 0.3, 1.6)
-				mb.cyl(Transform3D(Basis(Vector3.RIGHT, PI), Vector3(0, 0.06, 0)),
-					0.035, 0.035, handle, 6, Color(0.30, 0.21, 0.13))
-				match skill:
-					Const.Skill.AXES:
-						mb.rod(Vector3(0, -handle, 0), Vector3(0, blade * 0.9, 0), 0.03, 5,
-							Color(0.34, 0.24, 0.15))
-						mb.box(Transform3D(Basis(Vector3.FORWARD, 0.25),
-							Vector3(0.13, blade * 0.8, 0)), Vector3(0.30, 0.26, 0.05), col)
-					Const.Skill.SPEARS:
-						mb.rod(Vector3(0, -handle, 0), Vector3(0, blade * 1.6, 0), 0.028, 5,
-							Color(0.34, 0.24, 0.15))
-						mb.cone(Transform3D(Basis.IDENTITY, Vector3(0, blade * 1.6, 0)),
-							0.05, 0.30, 5, col)
-					Const.Skill.CLUBS, Const.Skill.PICKAXES:
-						mb.rod(Vector3(0, -handle, 0), Vector3(0, blade * 0.8, 0), 0.032, 5,
-							Color(0.34, 0.24, 0.15))
-						if skill == Const.Skill.PICKAXES:
-							mb.box(Transform3D(Basis(Vector3.FORWARD, 1.3),
-								Vector3(0, blade * 0.8, 0)), Vector3(0.62, 0.07, 0.07), col)
-						else:
-							mb.box(Transform3D(Basis.IDENTITY, Vector3(0, blade * 0.85, 0)),
-								Vector3(0.17, 0.24, 0.17), col)
-					_:
-						mb.box(Transform3D(Basis.IDENTITY, Vector3(0, -handle * 0.5, 0)),
-							Vector3(0.20, 0.05, 0.06), col.darkened(0.4))
-						mb.box(Transform3D(Basis.IDENTITY, Vector3(0, blade * 0.5, 0)),
-							Vector3(0.075, blade, 0.028), col)
-						mb.cone(Transform3D(Basis.IDENTITY, Vector3(0, blade, 0)),
-							0.05, 0.14, 4, col)
-		_:
-			mb.box(Transform3D.IDENTITY, Vector3(0.2, 0.2, 0.2), col)
-	var mi := MeshInstance3D.new()
-	mi.mesh = mb.commit()
-	mi.material_override = MatLib.flat(Color.WHITE, 0.5, 0.35)
-	# 손에 쥔 상태로 보이게 위치 조정
-	mi.position = Vector3(0, -0.05, 0)
-	return mi
 
-func _tint_armor() -> void:
-	var chest := inventory.equipped_id(Inventory.SLOT_CHEST)
-	var torso := rig.get_node_or_null("hips/torso") as MeshInstance3D
-	if torso:
-		var c := ItemDB.color_of(chest) if chest != "" else Color(0.45, 0.36, 0.26)
-		torso.material_override = MatLib.flat(c, 0.85)
-	var legs := inventory.equipped_id(Inventory.SLOT_LEGS)
-	for ln in ["hips/leg_l/mesh", "hips/leg_r/mesh"]:
-		var m := rig.get_node_or_null(ln) as MeshInstance3D
-		if m:
-			var c2 := ItemDB.color_of(legs) if legs != "" else Color(0.36, 0.28, 0.20)
-			m.material_override = MatLib.flat(c2, 0.85)
-	var head_item := inventory.equipped_id(Inventory.SLOT_HEAD)
-	var hm := rig.get_node_or_null("hips/head_pivot/head") as MeshInstance3D
-	if hm:
-		hm.material_override = MatLib.flat(
-			ItemDB.color_of(head_item).lightened(0.1) if head_item != "" else Color.WHITE, 0.85)
-
-# ═══════════════════════════════════════════════ 사망
-func _on_died() -> void:
-	GameState.stats["deaths"] = int(GameState.stats["deaths"]) + 1
-	Sfx.play("death", -2.0)
-	# 무덤 생성 후 소지품 전부 이전
-	var tomb := Tombstone.new()
-	get_tree().current_scene.add_child(tomb)
-	tomb.global_position = global_position + Vector3(0, 0.1, 0)
-	tomb.store_from(inventory)
-	inventory.clear_all()
-	stats.skill_death_penalty()
-	_refresh_equipment()
-	GameState.msg(tr("MSG_YOU_DIED"))
-
-func respawn_at(pos: Vector3) -> void:
-	global_position = pos + Vector3(0, 1.0, 0)
+func _respawn() -> void:
+	hp = max_hp
+	stamina = max_stamina
+	global_position = spawn_point
 	velocity = Vector3.ZERO
-	stats.revive()
-	stats.add_status("rested", 120.0, {"comfort": 1})
-	_refresh_equipment()
+	game.notify("파도가 당신을 해안으로 돌려보냈습니다.", Color(0.82, 0.54, 0.44), 3.0)
 
-# ═══════════════════════════════════════════════ 직렬화
-func to_dict() -> Dictionary:
+
+func _update_prompt(text: String) -> void:
+	if game != null and game.hud != null:
+		game.hud.set_prompt(text)
+
+
+func _update_camera_shake() -> void:
+	if camera_shake > 0.0:
+		camera.h_offset = randf_range(-camera_shake, camera_shake)
+		camera.v_offset = randf_range(-camera_shake, camera_shake)
+	else:
+		camera.h_offset = move_toward(camera.h_offset, 0.0, 0.03)
+		camera.v_offset = move_toward(camera.v_offset, 0.0, 0.03)
+
+
+func _swing_visual() -> void:
+	if hand_item == null:
+		return
+	var start_rotation := hand_item.rotation
+	var tween := hand_item.create_tween()
+	tween.tween_property(hand_item, "rotation", start_rotation + Vector3(-1.1, 0, -0.5), 0.12).set_trans(Tween.TRANS_QUAD)
+	tween.tween_property(hand_item, "rotation", start_rotation, 0.24).set_trans(Tween.TRANS_BACK)
+
+
+func _build_character_visual() -> void:
+	var body_material := StandardMaterial3D.new()
+	body_material.albedo_color = Color(0.27, 0.34, 0.31)
+	body_material.roughness = 0.9
+	fallback_body.material_override = body_material
+	_build_fallback_details()
+	if ResourceLoader.exists(BARBARIAN_PATH):
+		var resource: Resource = load(BARBARIAN_PATH)
+		if resource is PackedScene:
+			var candidate := (resource as PackedScene).instantiate()
+			if candidate is Node3D and _contains_mesh(candidate):
+				var animator := _find_animation_player_with_idle(candidate)
+				if animator != null:
+					active_model = candidate as Node3D
+					active_model.name = "BarbarianModel"
+					active_model.rotation.y = PI
+					active_model.visible = false
+					visual_root.add_child(active_model)
+					character_animator = animator
+					character_clips = _collect_character_clips(character_animator)
+					_configure_character_animation_loops()
+					character_animator.animation_finished.connect(_on_character_animation_finished)
+					var idle_clip: StringName = character_clips.get("idle", &"")
+					_play_character_clip(idle_clip)
+					character_animator.advance(0.001)
+					glb_idle_started = character_animator.is_playing() and character_animator.current_animation == idle_clip
+					if glb_idle_started:
+						character_visual_mode = "animated_glb"
+						active_model.visible = true
+						for child in visual_root.get_children():
+							if child.name.begins_with("Fallback"):
+								child.visible = false
+					else:
+						_discard_glb_model()
+				else:
+					candidate.queue_free()
+			else:
+				candidate.queue_free()
+	_update_hand_item()
+
+
+func _contains_mesh(node: Node) -> bool:
+	if node is MeshInstance3D:
+		return true
+	for child in node.get_children():
+		if _contains_mesh(child):
+			return true
+	return false
+
+
+func _find_animation_player_with_idle(node: Node) -> AnimationPlayer:
+	var players: Array[AnimationPlayer] = []
+	_collect_animation_players(node, players)
+	var selected: AnimationPlayer
+	var selected_score := -1
+	for animator in players:
+		var idle_clip := _select_character_clip(animator, ["idle"])
+		if idle_clip == &"":
+			continue
+		var score := _animation_match_score(idle_clip, ["idle"])
+		if score > selected_score:
+			selected = animator
+			selected_score = score
+	return selected
+
+
+func _collect_animation_players(node: Node, output: Array[AnimationPlayer]) -> void:
+	if node is AnimationPlayer:
+		output.append(node as AnimationPlayer)
+	for child in node.get_children():
+		_collect_animation_players(child, output)
+
+
+func _collect_character_clips(animator: AnimationPlayer) -> Dictionary:
 	return {
-		"pos": [global_position.x, global_position.y, global_position.z],
-		"yaw": yaw,
-		"inv": inventory.to_dict(),
-		"stats": stats.to_dict(),
+		"idle": _select_character_clip(animator, ["idle"]),
+		"walk": _select_character_clip(animator, ["walking", "walk"]),
+		"run": _select_character_clip(animator, ["running", "run", "sprint"]),
+		"block": _select_character_clip(animator, ["blocking", "block", "guard", "defend"]),
+		"attack": _select_character_clip(animator, ["1h_melee_attack_chop", "melee_attack_chop", "attack", "chop", "slice", "swing"]),
 	}
 
-func from_dict(d: Dictionary) -> void:
-	var p: Array = d.get("pos", [0, 60, 0])
-	global_position = Vector3(float(p[0]), float(p[1]), float(p[2]))
-	yaw = float(d.get("yaw", 0.0))
-	inventory.from_dict(d.get("inv", {}))
-	stats.from_dict(d.get("stats", {}))
-	_refresh_equipment()
+
+func _select_character_clip(animator: AnimationPlayer, keywords: Array) -> StringName:
+	var best_clip: StringName = &""
+	var best_score := -1
+	for entry in animator.get_animation_list():
+		var clip_name := StringName(entry)
+		var lower_name := String(clip_name).to_lower()
+		if lower_name.contains("reset"):
+			continue
+		var score := _animation_match_score(clip_name, keywords)
+		if score > best_score:
+			best_clip = clip_name
+			best_score = score
+	return best_clip
+
+
+func _animation_match_score(clip_name: StringName, keywords: Array) -> int:
+	var lower_name := String(clip_name).to_lower()
+	var best_score := -1
+	for index in range(keywords.size()):
+		var keyword := str(keywords[index]).to_lower()
+		var score := -1
+		if lower_name == keyword:
+			score = 100 - index
+		elif lower_name.begins_with(keyword):
+			score = 80 - index
+		elif lower_name.contains(keyword):
+			score = 60 - index
+		best_score = maxi(best_score, score)
+	return best_score
+
+
+func _configure_character_animation_loops() -> void:
+	for state in ["idle", "walk", "run", "block"]:
+		var clip_name: StringName = character_clips.get(state, &"")
+		if clip_name != &"":
+			var animation := character_animator.get_animation(clip_name)
+			if animation != null:
+				animation.loop_mode = Animation.LOOP_LINEAR
+	var attack_clip: StringName = character_clips.get("attack", &"")
+	if attack_clip != &"":
+		var attack_animation := character_animator.get_animation(attack_clip)
+		if attack_animation != null:
+			attack_animation.loop_mode = Animation.LOOP_NONE
+
+
+func _play_character_clip(clip_name: StringName, restart: bool = false) -> void:
+	if character_animator == null or clip_name == &"":
+		return
+	if not restart and current_character_clip == clip_name and character_animator.is_playing():
+		return
+	character_animator.play(clip_name, 0.12)
+	current_character_clip = clip_name
+
+
+func _update_character_animation(horizontal_speed: float) -> void:
+	if character_animator == null or attack_animation_active:
+		return
+	var state := "idle"
+	if blocking:
+		state = "block"
+	elif horizontal_speed > 5.25:
+		state = "run"
+	elif horizontal_speed > 0.2:
+		state = "walk"
+	var target_clip: StringName = character_clips.get(state, &"")
+	if target_clip == &"" and state == "run":
+		target_clip = character_clips.get("walk", &"")
+	if target_clip == &"":
+		target_clip = character_clips.get("idle", &"")
+	_play_character_clip(target_clip)
+
+
+func _play_attack_animation() -> void:
+	var attack_clip: StringName = character_clips.get("attack", &"")
+	if character_animator == null or attack_clip == &"":
+		return
+	attack_animation_active = true
+	_play_character_clip(attack_clip, true)
+
+
+func _on_character_animation_finished(clip_name: StringName) -> void:
+	var attack_clip: StringName = character_clips.get("attack", &"")
+	if attack_animation_active and clip_name == attack_clip:
+		attack_animation_active = false
+		_update_character_animation(Vector2(velocity.x, velocity.z).length())
+
+
+func _discard_glb_model() -> void:
+	if active_model != null:
+		if active_model.get_parent() != null:
+			active_model.get_parent().remove_child(active_model)
+		active_model.queue_free()
+	active_model = null
+	character_animator = null
+	character_clips.clear()
+	current_character_clip = &""
+	glb_idle_started = false
+	character_visual_mode = "procedural_fallback"
+
+
+func get_character_visual_mode() -> String:
+	return character_visual_mode
+
+
+func is_glb_idle_playing() -> bool:
+	if character_visual_mode != "animated_glb" or character_animator == null:
+		return false
+	var idle_clip: StringName = character_clips.get("idle", &"")
+	return glb_idle_started and character_animator.is_playing() and character_animator.current_animation == idle_clip
+
+
+func has_valid_character_visual() -> bool:
+	if character_visual_mode == "animated_glb":
+		return active_model != null and is_instance_valid(active_model) and glb_idle_started
+	return character_visual_mode == "procedural_fallback" and fallback_body.visible
+
+
+func _build_fallback_details() -> void:
+	var skin := Color(0.58, 0.42, 0.30)
+	var iron := Color(0.25, 0.28, 0.28)
+	_add_visual_mesh(SphereMesh.new(), skin, Vector3(0, 1.72, 0), Vector3(0.34, 0.34, 0.34), "FallbackHead")
+	var helmet := SphereMesh.new()
+	helmet.radius = 0.37
+	helmet.height = 0.36
+	helmet.radial_segments = 8
+	helmet.rings = 3
+	_add_visual_mesh(helmet, iron, Vector3(0, 1.92, 0), Vector3(1, 0.55, 1), "FallbackHelmet")
+	var cloak := BoxMesh.new()
+	cloak.size = Vector3(0.78, 1.15, 0.12)
+	_add_visual_mesh(cloak, Color(0.30, 0.12, 0.10), Vector3(0, 1.06, 0.31), Vector3.ONE, "FallbackCloak")
+	for side in [-1.0, 1.0]:
+		var horn := CylinderMesh.new()
+		horn.top_radius = 0.015
+		horn.bottom_radius = 0.085
+		horn.height = 0.38
+		horn.radial_segments = 6
+		var horn_node := _add_visual_mesh(horn, Color(0.66, 0.59, 0.43), Vector3(side * 0.31, 2.05, 0), Vector3.ONE, "FallbackHorn")
+		horn_node.rotation.z = side * 0.8
+	hand_item = Node3D.new()
+	hand_item.name = "HandItem"
+	hand_item.position = Vector3(-0.52, 1.08, -0.18)
+	visual_root.add_child(hand_item)
+
+
+func _update_hand_item() -> void:
+	if hand_item == null:
+		return
+	for child in hand_item.get_children():
+		child.queue_free()
+	var item: String = HOTBAR[selected_slot]
+	if item not in ["stone_axe", "hammer"] or item_count(item) <= 0:
+		return
+	var handle := CylinderMesh.new()
+	handle.top_radius = 0.035
+	handle.bottom_radius = 0.045
+	handle.height = 0.95
+	handle.radial_segments = 6
+	_add_item_mesh(handle, Color(0.34, 0.23, 0.14), Vector3(0, 0, 0))
+	var head := BoxMesh.new()
+	head.size = Vector3(0.48 if item == "stone_axe" else 0.34, 0.22, 0.16 if item == "stone_axe" else 0.28)
+	_add_item_mesh(head, Color(0.34, 0.38, 0.37) if item == "stone_axe" else Color(0.38, 0.29, 0.19), Vector3(0, 0.42, 0))
+	hand_item.rotation.z = -0.25
+
+
+func _add_visual_mesh(mesh: PrimitiveMesh, color: Color, at: Vector3, mesh_scale: Vector3, node_name: String) -> MeshInstance3D:
+	var node := MeshInstance3D.new()
+	node.name = node_name
+	node.mesh = mesh
+	node.position = at
+	node.scale = mesh_scale
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.88
+	node.material_override = material
+	visual_root.add_child(node)
+	return node
+
+
+func _add_item_mesh(mesh: PrimitiveMesh, color: Color, at: Vector3) -> void:
+	var node := MeshInstance3D.new()
+	node.mesh = mesh
+	node.position = at
+	var material := StandardMaterial3D.new()
+	material.albedo_color = color
+	material.roughness = 0.9
+	node.material_override = material
+	hand_item.add_child(node)

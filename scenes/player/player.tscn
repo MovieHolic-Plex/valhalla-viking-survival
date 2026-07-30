@@ -1,0 +1,45 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scripts/player/player.gd" id="1_player"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape_player"]
+radius = 0.42
+height = 1.8
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_fallback"]
+radius = 0.38
+height = 1.65
+radial_segments = 8
+rings = 4
+
+[node name="Player" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 29
+script = ExtResource("1_player")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.9, 0)
+shape = SubResource("CapsuleShape_player")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="FallbackBody" type="MeshInstance3D" parent="VisualRoot"]
+position = Vector3(0, 0.93, 0)
+mesh = SubResource("CapsuleMesh_fallback")
+
+[node name="CameraPivot" type="Node3D" parent="."]
+position = Vector3(0, 1.55, 0)
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraPivot"]
+spring_length = 5.2
+margin = 0.2
+collision_mask = 17
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot/SpringArm3D"]
+current = true
+fov = 68.0
+
+[node name="AimRay" type="RayCast3D" parent="CameraPivot/SpringArm3D/Camera3D"]
+target_position = Vector3(0, 0, -9)
+collision_mask = 28
+collide_with_areas = true

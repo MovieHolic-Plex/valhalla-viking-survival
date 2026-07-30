@@ -1,0 +1,34 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/game/game.gd" id="1_game"]
+[ext_resource type="Script" path="res://scripts/world/world.gd" id="2_world"]
+[ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="3_player"]
+[ext_resource type="Script" path="res://scripts/systems/building_system.gd" id="4_build"]
+[ext_resource type="Script" path="res://scripts/systems/save_system.gd" id="5_save"]
+[ext_resource type="Script" path="res://scripts/vfx/feedback.gd" id="6_feedback"]
+[ext_resource type="Script" path="res://scripts/ui/hud.gd" id="7_hud"]
+
+[node name="Game" type="Node3D"]
+script = ExtResource("1_game")
+
+[node name="World" type="Node3D" parent="."]
+script = ExtResource("2_world")
+
+[node name="Buildings" type="Node3D" parent="."]
+
+[node name="Actors" type="Node3D" parent="."]
+
+[node name="Player" parent="." instance=ExtResource("3_player")]
+
+[node name="BuildingSystem" type="Node3D" parent="."]
+script = ExtResource("4_build")
+
+[node name="SaveSystem" type="Node" parent="."]
+script = ExtResource("5_save")
+
+[node name="Feedback" type="Node3D" parent="."]
+script = ExtResource("6_feedback")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 20
+script = ExtResource("7_hud")
