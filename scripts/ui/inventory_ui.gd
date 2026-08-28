@@ -21,9 +21,11 @@ var _equip_box: HBoxContainer
 
 func _ready() -> void:
 	name = "inventory_ui"
-	custom_minimum_size = Vector2(1080, 620)
+	custom_minimum_size = Vector2(1040, 580)
 	add_theme_stylebox_override("panel",
 		UITheme.panel_box(Color(0.08, 0.07, 0.06, 0.97), UITheme.GOLD_DIM, 6, 3))
+	get_viewport().size_changed.connect(_apply_responsive_layout)
+	_apply_responsive_layout()
 	_build()
 
 func bind(p: Player) -> void:
@@ -67,7 +69,7 @@ func _build() -> void:
 	# ── 오른쪽: 아이템 정보 / 상자 ──
 	var right := VBoxContainer.new()
 	right.add_theme_constant_override("separation", 10)
-	right.custom_minimum_size = Vector2(340, 0)
+	right.custom_minimum_size = Vector2(320, 0)
 	root.add_child(right)
 
 	_cbox = VBoxContainer.new()
@@ -90,14 +92,14 @@ func _build() -> void:
 	_info.bbcode_enabled = true
 	_info.fit_content = false
 	_info.scroll_active = true
-	_info.custom_minimum_size = Vector2(320, 220)
+	_info.custom_minimum_size = Vector2(300, 180)
 	_info.add_theme_font_override("normal_font", UITheme.body_font())
 	_info.add_theme_font_size_override("normal_font_size", 15)
 	infopanel.add_child(_info)
 
-	var hint := UITheme.label(tr("UI_INV_HINT"), 13, UITheme.TEXT_DIM)
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.custom_minimum_size = Vector2(320, 0)
+	var hint := UITheme.wrap_label(tr("UI_INV_HINT"), 14, UITheme.TEXT)
+	hint.custom_minimum_size = Vector2(300, 0)
+	hint.max_lines_visible = 3
 	right.add_child(hint)
 
 	# 집어든 아이템을 커서에 표시
@@ -114,6 +116,8 @@ func _build() -> void:
 func _make_slot(idx: int, is_container: bool) -> Panel:
 	var p := Panel.new()
 	p.custom_minimum_size = Vector2(60, 60)
+	p.focus_mode = Control.FOCUS_ALL
+	p.set_meta("keyboard_actionable", true)
 	p.add_theme_stylebox_override("panel", UITheme.slot_box())
 	p.set_meta("idx", idx)
 	p.set_meta("container", is_container)
@@ -143,6 +147,7 @@ func _make_slot(idx: int, is_container: bool) -> Panel:
 
 	p.gui_input.connect(_on_slot_input.bind(idx, is_container))
 	p.mouse_entered.connect(_on_slot_hover.bind(idx, is_container))
+	p.focus_entered.connect(_on_slot_hover.bind(idx, is_container))
 	return p
 
 # ═══════════════════════════════════════════════ 갱신
@@ -212,11 +217,19 @@ func _refresh_equip() -> void:
 			p.add_child(tex)
 
 # ═══════════════════════════════════════════════ 입력
+func _slot_inventory(is_container: bool) -> Inventory:
+	return container_inv if is_container else player.inventory
+
+
 func _on_slot_input(event: InputEvent, idx: int, is_container: bool) -> void:
-	if not (event is InputEventMouseButton) or not event.pressed:
-		return
-	var inv := container_inv if is_container else player.inventory
+	var inv := _slot_inventory(is_container)
 	if inv == null:
+		return
+	if event.is_action_pressed("ui_accept"):
+		_click_move(inv, idx, is_container)
+		accept_event()
+		return
+	if not (event is InputEventMouseButton) or not event.pressed:
 		return
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if Input.is_key_pressed(KEY_SHIFT) and container_inv != null:
@@ -226,7 +239,6 @@ func _on_slot_input(event: InputEvent, idx: int, is_container: bool) -> void:
 	elif event.button_index == MOUSE_BUTTON_RIGHT:
 		if _held.is_empty() and not is_container:
 			_use_slot(idx)
-
 func _click_move(inv: Inventory, idx: int, is_container: bool) -> void:
 	if _held.is_empty():
 		var s: Dictionary = inv.get_slot(idx)
@@ -387,3 +399,14 @@ func close_container() -> void:
 		container_inv.changed.disconnect(refresh)
 	container_inv = null
 	_cbox.visible = false
+
+func apply_responsive_layout() -> void:
+	_apply_responsive_layout()
+
+func _apply_responsive_layout() -> void:
+	var viewport_size := get_viewport_rect().size
+	var ui_scale := maxf(get_tree().root.content_scale_factor, 0.01)
+	var margin := UITheme.safe_margin(viewport_size.x)
+	var available := viewport_size / ui_scale - Vector2.ONE * margin * 2.0
+	custom_minimum_size = Vector2(minf(1040.0, maxf(0.0, available.x)),
+		minf(580.0, maxf(0.0, available.y)))

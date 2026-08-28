@@ -6,12 +6,14 @@ signal removed(piece)
 
 var piece_id := "wood_floor"
 var net_id := 0        # 멀티플레이 동기화 ID (0 = 로컬 전용)
+var owner_id := ""     # durable local player identity; snapshots expose it read-only
 var data: Dictionary = {}
 var hp := 100.0
 var max_hp := 100.0
 var support := 1.0
 var grounded := false
 var yaw := 0.0
+var authority_snapshot := false
 
 var storage: Inventory = null       # 상자
 var _mi: MeshInstance3D
@@ -32,13 +34,21 @@ static func make(id: String) -> BuildPiece:
 	p.data = RecipeDB.piece(id)
 	return p
 
+## 읽기 전용 권위 스냅샷 후보. 로컬 건축 생성 경로와 분리한다.
+static func make_authority_snapshot(id: String) -> BuildPiece:
+	var p := make(id)
+	p.authority_snapshot = true
+	return p
+
 func _ready() -> void:
 	if data.is_empty():
 		data = RecipeDB.piece(piece_id)
-	collision_layer = Const.L_BUILDING
+	collision_layer = 0 if authority_snapshot else Const.L_BUILDING
 	collision_mask = 0
-	add_to_group("build_piece")
-	add_to_group("interactable")
+	if not authority_snapshot:
+		add_to_group("build_piece")
+		add_to_group("interactable")
+		set_meta("piece_id", piece_id)
 
 	max_hp = 100.0 * (2.0 if data.get("stone", false) else 1.0)
 	hp = max_hp
@@ -62,16 +72,15 @@ func _ready() -> void:
 	cs.shape = bs
 	add_child(cs)
 
-	if data.get("comfort", 0) > 0 or data.get("fire", false):
+	if not authority_snapshot and (data.get("comfort", 0) > 0 or data.get("fire", false)):
 		add_to_group("comfort_source")
 		set_meta("comfort", int(data.get("comfort", 0)))
 		set_meta("fire", bool(data.get("fire", false)))
-		set_meta("piece_id", piece_id)
 
-	if data.get("station", "") != "" or data.get("wb_up", 0) > 0 \
-			or data.get("forge_up", 0) > 0:
+	if not authority_snapshot and (data.get("station", "") != "" or data.get("wb_up", 0) > 0 \
+			or data.get("forge_up", 0) > 0):
 		add_to_group("craft_station")
-	if data.get("station", "") == RecipeDB.ST_WORKBENCH:
+	if not authority_snapshot and data.get("station", "") == RecipeDB.ST_WORKBENCH:
 		add_to_group("spawn_blocker")
 
 	if data.get("container", 0) > 0:
@@ -114,6 +123,8 @@ func _material_color() -> Color:
 
 # ═══════════════════════════════════════════════ 처리
 func _process(delta: float) -> void:
+	if authority_snapshot:
+		return
 	if data.get("cook", false):
 		_tick_cook(delta)
 	if data.get("smelter", false):
@@ -203,7 +214,7 @@ func _refresh_label() -> void:
 
 # ═══════════════════════════════════════════════ 상호작용
 func can_interact(_player) -> bool:
-	return true
+	return not authority_snapshot and (not Net.is_online or Net.is_host)
 
 func prompt() -> String:
 	if data.get("door", false):
@@ -226,16 +237,26 @@ func prompt() -> String:
 		return tr("PROMPT_PORTAL")
 	return ""
 
-func interact(player) -> void:
+func unsupported_interaction_result() -> Dictionary:
+	return Net.unsupported_build_result()
+
+func interact(player) -> Dictionary:
+	if player == null or not is_instance_valid(player) or not (player is Player):
+		return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "INVALID_PLAYER")
+	if player.input_locked:
+		return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "INPUT_LOCKED")
+	if player.stats == null or player.stats.is_dead:
+		return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "PLAYER_DEAD")
+	if authority_snapshot or Net.is_online and not Net.is_host:
+		return unsupported_interaction_result()
 	var scene := get_tree().current_scene
 	if data.get("door", false):
 		_door_open = not _door_open
 		var tw := create_tween()
 		tw.tween_property(self, "rotation:y", yaw + (PI * 0.5 if _door_open else 0.0), 0.3)
 		Sfx.play_at("build", global_position, scene, -14.0, 1.3)
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if data.get("bed", false):
-		var ui = scene.get_node_or_null("ui")
 		if GameState.is_night():
 			GameState.skip_to_morning()
 			player.stats.add_status("rested", 480.0, {"comfort": 2})
@@ -243,50 +264,56 @@ func interact(player) -> void:
 		else:
 			GameState.msg(tr("MSG_CANT_SLEEP"))
 		player.set_meta("spawn_point", global_position + Vector3(0, 0.5, 0))
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if data.get("chair", false):
 		player.global_position = global_position + Vector3(0, 0.6, 0)
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if storage != null:
 		var ui2 = scene.get_node_or_null("ui")
-		if ui2 != null and ui2.has_method("open_container_inv"):
-			ui2.open_container_inv(self, storage, player)
-		return
+		if ui2 == null or not ui2.has_method("open_container_inv"):
+			return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
+		ui2.open_container_inv(self, storage, player)
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if data.get("cook", false):
-		_try_cook(player)
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "") \
+			if _try_cook(player) else Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
 	if data.get("smelter", false) or data.get("kiln", false):
-		_try_insert(player)
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "") \
+			if _try_insert(player) else Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
 	if data.get("station", "") != "":
 		var ui3 = scene.get_node_or_null("ui")
-		if ui3 != null and ui3.has_method("open_craft"):
-			ui3.open_craft(str(data["station"]), player)
-		return
+		if ui3 == null or not ui3.has_method("open_craft"):
+			return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
+		ui3.open_craft(str(data["station"]), player)
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if data.has("crop") and _grown:
 		var amt := int(data.get("yield", 3))
 		ItemDrop.spawn(scene, global_position + Vector3(0, 0.4, 0),
 			str(data["crop"]), amt)
 		removed.emit(self)
 		queue_free()
-		return
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 	if data.get("portal", false):
-		_use_portal(player)
+		return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "") \
+			if _use_portal(player) else Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
+	return Net.build_result(false, Net.BUILD_STATUS_REJECTED, "NO_ACTION")
 
-func _try_cook(player) -> void:
+func _try_cook(player) -> bool:
 	# 완성품 회수 우선
 	for i in range(_cook_slots.size() - 1, -1, -1):
 		var s: Dictionary = _cook_slots[i]
 		if s.get("done", false) or s.get("burnt", false):
 			var out: String = "coal" if s.get("burnt", false) else str(s["out"])
-			player.inventory.add_item(out, 1)
+			if player.inventory.add_item(out, 1) != 0:
+				GameState.msg(tr("MSG_INVENTORY_FULL"))
+				return false
 			player.notify_pickup(out, 1)
 			_cook_slots.remove_at(i)
 			_refresh_label()
-			return
+			return true
 	if _cook_slots.size() >= 4:
 		GameState.msg(tr("MSG_STATION_FULL"))
-		return
+		return false
 	for raw in RecipeDB.cook:
 		if player.inventory.count(raw) > 0:
 			player.inventory.remove_item(raw, 1)
@@ -295,54 +322,59 @@ func _try_cook(player) -> void:
 				"done": false, "burnt": false})
 			Sfx.play_at("fire", global_position, get_tree().current_scene, -16.0)
 			_refresh_label()
-			return
+			return true
 	GameState.msg(tr("MSG_NOTHING_TO_COOK"))
+	return false
 
-func _try_insert(player) -> void:
+func _try_insert(player) -> bool:
 	var table: Dictionary = RecipeDB.smelt if data.get("smelter", false) else RecipeDB.kiln
 	if data.has("fuel") and player.inventory.count("coal") > 0 and _smelt_fuel < 20:
 		player.inventory.remove_item("coal", 1)
 		_smelt_fuel += 1
 		Sfx.play_at("build", global_position, get_tree().current_scene, -16.0)
 		_refresh_label()
-		return
+		return true
 	if _smelt_in.size() >= 10:
 		GameState.msg(tr("MSG_STATION_FULL"))
-		return
+		return false
 	for ore in table:
 		if player.inventory.count(ore) > 0:
 			player.inventory.remove_item(ore, 1)
 			_smelt_in.append(ore)
 			Sfx.play_at("build", global_position, get_tree().current_scene, -16.0)
 			_refresh_label()
-			return
+			return true
 	GameState.msg(tr("MSG_NOTHING_TO_SMELT"))
+	return false
 
-func _use_portal(player) -> void:
+func _use_portal(player) -> bool:
 	var others: Array = []
 	for p in get_tree().get_nodes_in_group("build_piece"):
 		if p != self and is_instance_valid(p) and p.data.get("portal", false):
 			others.append(p)
 	if others.is_empty():
 		GameState.msg(tr("MSG_NO_PORTAL"))
-		return
+		return false
 	# 포탈로 못 가져가는 물건 확인
 	for i in player.inventory.size():
 		var s: Dictionary = player.inventory.get_slot(i)
 		if not s.is_empty() and not ItemDB.is_teleportable(s["id"]):
 			GameState.msg(tr("MSG_PORTAL_BLOCKED") % ItemDB.name_of(s["id"]))
 			Sfx.play("error", -8.0)
-			return
+			return false
 	var dest: BuildPiece = others[0]
 	Sfx.play("portal", -2.0)
 	player.global_position = dest.global_position + Vector3(0, 1.0, 0) \
 		+ Vector3(0, 0, 1.5).rotated(Vector3.UP, dest.yaw)
 	Fx.burst(get_tree().current_scene, player.global_position, Color(0.4, 0.9, 1.0),
 		40, 6.0, 0.12, 1.2)
+	return true
 
 # ═══════════════════════════════════════════════ 내구도
 func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
 		_kb: float = 0.0) -> void:
+	if authority_snapshot or Net.is_online and (not Net.is_host or attacker is RemotePlayer):
+		return
 	var total := 0.0
 	for k in dmg:
 		# 나무 구조물은 도끼(CHOP)에, 석재는 곡괭이에 약하다
@@ -359,6 +391,8 @@ func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
 		destroy(true)
 
 func destroy(drop_mats: bool) -> void:
+	if authority_snapshot or Net.is_online and not Net.is_host:
+		return
 	if drop_mats:
 		var mats: Dictionary = data.get("mats", {})
 		for id in mats:
@@ -377,9 +411,22 @@ func destroy(drop_mats: bool) -> void:
 	removed.emit(self)
 	queue_free()
 
+func remove_authority_snapshot(immediate: bool = false) -> void:
+	if not authority_snapshot:
+		return
+	removed.emit(self)
+	if immediate:
+		free()
+	else:
+		queue_free()
+
 func to_dict() -> Dictionary:
+	if authority_snapshot:
+		return {}
 	var d := {"id": piece_id, "p": [global_position.x, global_position.y, global_position.z],
 		"y": yaw, "hp": hp}
+	if owner_id != "":
+		d["owner_id"] = owner_id
 	if storage != null:
 		d["inv"] = storage.to_dict()
 	if not _smelt_in.is_empty():
@@ -389,9 +436,15 @@ func to_dict() -> Dictionary:
 		d["grown"] = true
 	return d
 
-func from_dict(d: Dictionary) -> void:
+func from_dict(d: Dictionary) -> bool:
+	if authority_snapshot or bool(d.get("authority_snapshot", false)):
+		return false
+	var restored_owner = d.get("owner_id", GameState.local_player_id)
+	if not (restored_owner is String) or not IdentityStore.is_uuid(restored_owner):
+		return false
 	hp = float(d.get("hp", max_hp))
 	yaw = float(d.get("y", 0.0))
+	owner_id = restored_owner
 	if storage != null and d.has("inv"):
 		storage.from_dict(d["inv"])
 	if d.has("smelt"):
@@ -401,3 +454,4 @@ func from_dict(d: Dictionary) -> void:
 		_grown = true
 		_grow_t = 0.0
 		_update_plant_visual()
+	return true

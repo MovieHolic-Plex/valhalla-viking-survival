@@ -9,6 +9,25 @@ const ST_CAULDRON := "cauldron"
 const ST_ARTISAN := "artisan_table"
 const ST_STONECUTTER := "stonecutter"
 
+## RT1 first-session budget. RecipeDB is the sole authority for these costs.
+const RT1_HAMMER_ID := "hammer"
+const RT1_SHELTER_PIECES := {
+	"campfire": 1,
+	"workbench": 1,
+	"wood_floor": 1,
+	"wood_wall": 3,
+	"wood_roof": 2,
+}
+const RT1_TOTAL_BUDGET := {"wood": 27, "stone": 7}
+const RT1_STEP_COSTS := {
+	"hammer": {"wood": 3, "stone": 2},
+	"campfire": {"wood": 2, "stone": 5},
+	"workbench": {"wood": 10},
+	"shelter_floor": {"wood": 2},
+	"shelter_walls": {"wood": 6},
+	"shelter_roofs": {"wood": 4},
+}
+
 ## 제작 레시피: {out, amount, station, level, mats:{}}
 var craft: Array[Dictionary] = []
 ## 요리대 레시피: raw -> {out, time}
@@ -25,6 +44,7 @@ func _ready() -> void:
 	_build_cook()
 	_build_smelt()
 	_build_pieces()
+	_assert_rt1_budget()
 
 # ────────────────────────────────────────────────────────── 제작
 func _c(out: String, mats: Dictionary, station: String = ST_NONE, level: int = 1, amount: int = 1) -> void:
@@ -42,6 +62,53 @@ func recipe_of(item_id: String) -> Dictionary:
 		if r["out"] == item_id:
 			return r
 	return {}
+
+func piece_cost(piece_id: String) -> Dictionary:
+	return _copy_mats(piece(piece_id).get("mats", {}))
+
+## Canonical RT1 per-step costs. Definitions are also checked against gameplay on startup.
+func rt1_step_costs() -> Dictionary:
+	return RT1_STEP_COSTS.duplicate(true)
+
+func rt1_total_budget() -> Dictionary:
+	return RT1_TOTAL_BUDGET.duplicate(true)
+
+func rt1_shortfall(available: Dictionary) -> Dictionary:
+	var out := {}
+	for material in RT1_TOTAL_BUDGET:
+		var amount := maxi(0, int(RT1_TOTAL_BUDGET[material]) - int(available.get(material, 0)))
+		if amount > 0:
+			out[material] = amount
+	return out
+
+func rt1_hammer_shortfall(available: Dictionary) -> Dictionary:
+	var out := {}
+	var mats: Dictionary = rt1_step_costs()[RT1_HAMMER_ID]
+	for material in mats:
+		var amount := maxi(0, int(mats[material]) - int(available.get(material, 0)))
+		if amount > 0:
+			out[material] = amount
+	return out
+
+func _copy_mats(value: Variant) -> Dictionary:
+	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
+
+func _assert_rt1_budget() -> void:
+	var gameplay_steps := {
+		"hammer": _copy_mats(recipe_of("hammer").get("mats", {})),
+		"campfire": _copy_mats(piece("campfire").get("mats", {})),
+		"workbench": _copy_mats(piece("workbench").get("mats", {})),
+		"shelter_floor": _scaled_piece_cost("wood_floor", 1),
+		"shelter_walls": _scaled_piece_cost("wood_wall", 3),
+		"shelter_roofs": _scaled_piece_cost("wood_roof", 2),
+	}
+	assert(gameplay_steps == RT1_STEP_COSTS, "RT1 gameplay costs diverged from canonical steps")
+
+func _scaled_piece_cost(id: String, count: int) -> Dictionary:
+	var mats := _copy_mats(piece(id).get("mats", {}))
+	for material in mats:
+		mats[material] = int(mats[material]) * count
+	return mats
 
 func _build_craft() -> void:
 	# 맨손 제작

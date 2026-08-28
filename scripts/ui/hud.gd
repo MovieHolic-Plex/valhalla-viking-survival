@@ -24,6 +24,16 @@ var boss_panel: PanelContainer
 var boss_bar: ProgressBar
 var boss_name: Label
 var build_hint: Label
+var objective_panel: PanelContainer
+var objective_title: Label
+var objective_detail: Label
+var objective_progress: Label
+var objective_action: Label
+var action_panel: PanelContainer
+var action_feedback: Label
+var _feedback_tween: Tween
+var _safe_left: VBoxContainer
+var _safe_right: VBoxContainer
 
 var _hotbar_slots: Array[Panel] = []
 var _selected_hotbar := 0
@@ -34,6 +44,8 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build()
+	get_viewport().size_changed.connect(_apply_safe_layout)
+	_apply_safe_layout()
 
 func bind(p: Player) -> void:
 	player = p
@@ -58,10 +70,10 @@ func _build() -> void:
 	# ── 좌하단: 체력 / 스태미나 / 음식 ──
 	var left := VBoxContainer.new()
 	left.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	left.position = Vector2(24, -156)
 	left.add_theme_constant_override("separation", 5)
 	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(left)
+	_safe_left = left
 
 	food_box = HBoxContainer.new()
 	food_box.add_theme_constant_override("separation", 4)
@@ -148,19 +160,25 @@ func _build() -> void:
 	)
 	add_child(crosshair)
 
-	# ── 상호작용 안내 ──
-	prompt_label = UITheme.label("", 19, UITheme.GOLD)
-	prompt_label.set_anchors_preset(Control.PRESET_CENTER)
-	prompt_label.position = Vector2(-180, 46)
-	prompt_label.custom_minimum_size = Vector2(360, 0)
+	# ── 상호작용 안내: 240x160 중앙 조준 제외 영역 아래 ──
+	var prompt_wrap := MarginContainer.new()
+	prompt_wrap.set_anchors_preset(Control.PRESET_CENTER)
+	prompt_wrap.offset_left = -240
+	prompt_wrap.offset_right = 240
+	prompt_wrap.offset_top = 92
+	prompt_wrap.offset_bottom = 152
+	prompt_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(prompt_wrap)
+	prompt_label = UITheme.wrap_label("", 19, UITheme.GOLD)
 	prompt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	prompt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	prompt_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(prompt_label)
+	prompt_wrap.add_child(prompt_label)
 
-	build_hint = UITheme.label("", 15, UITheme.TEXT_DIM)
+	build_hint = UITheme.wrap_label("", 15, UITheme.TEXT_DIM)
 	build_hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	build_hint.position = Vector2(-220, -120)
-	build_hint.custom_minimum_size = Vector2(440, 0)
+	build_hint.position = Vector2(-280, -120)
+	build_hint.custom_minimum_size = Vector2(560, 0)
 	build_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	build_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(build_hint)
@@ -168,11 +186,11 @@ func _build() -> void:
 	# ── 우상단: 시계 / 바이옴 / 날씨 ──
 	var right := VBoxContainer.new()
 	right.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	right.position = Vector2(-230, 18)
-	right.custom_minimum_size = Vector2(210, 0)
+	right.custom_minimum_size = Vector2(250, 0)
 	right.alignment = BoxContainer.ALIGNMENT_END
 	right.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(right)
+	_safe_right = right
 	clock_label = UITheme.title("07:00 · 1일차", 20)
 	clock_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(clock_label)
@@ -182,20 +200,58 @@ func _build() -> void:
 	weather_label = UITheme.label("", 14, UITheme.TEXT_DIM)
 	weather_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	right.add_child(weather_label)
+	for label in [clock_label, biome_label, weather_label]:
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	# ── 좌상단: 현재 목표. 긴 한국어/영어는 줄바꿈한다. ──
+	objective_panel = PanelContainer.new()
+	objective_panel.custom_minimum_size = Vector2(420, 0)
+	objective_panel.add_theme_stylebox_override("panel",
+		UITheme.panel_box(Color(0.07, 0.06, 0.05, 0.90), UITheme.GOLD_DIM, 5, 2))
+	objective_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(objective_panel)
+	var objective_box := VBoxContainer.new()
+	objective_box.add_theme_constant_override("separation", 3)
+	objective_panel.add_child(objective_box)
+	objective_title = UITheme.wrap_label(_localized("현재 목표", "CURRENT OBJECTIVE"), 13,
+		UITheme.GOLD)
+	objective_box.add_child(objective_title)
+	objective_detail = UITheme.wrap_label("", 18, UITheme.TEXT)
+	objective_detail.max_lines_visible = 3
+	objective_box.add_child(objective_detail)
+	objective_progress = UITheme.wrap_label("", 14, UITheme.TEXT_DIM)
+	objective_box.add_child(objective_progress)
+	objective_action = UITheme.wrap_label("", 15, UITheme.GOLD)
+	objective_action.max_lines_visible = 3
+	objective_box.add_child(objective_action)
+	objective_panel.visible = false
 
-	# ── 좌상단: 알림 ──
+	# ── 중앙 하단: 행동 결과. 색상과 [완료]/[불가] 표기를 함께 사용한다. ──
+	action_panel = PanelContainer.new()
+	action_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	action_panel.position = Vector2(-260, -176)
+	action_panel.custom_minimum_size = Vector2(520, 0)
+	action_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	action_panel.visible = false
+	add_child(action_panel)
+	action_feedback = UITheme.wrap_label("", 16, UITheme.TEXT)
+	action_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_panel.add_child(action_feedback)
+
+	# ── 목표 아래: 읽을 수 있는 독립 알림 카드 ──
 	msg_box = VBoxContainer.new()
 	msg_box.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	msg_box.position = Vector2(24, 20)
-	msg_box.add_theme_constant_override("separation", 3)
+	msg_box.position = Vector2(0, 132)
+	msg_box.custom_minimum_size = Vector2(420, 0)
+	msg_box.add_theme_constant_override("separation", 4)
 	msg_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(msg_box)
 
 	# ── 상단 중앙: 보스 체력바 ──
 	var boss_wrap := CenterContainer.new()
-	boss_wrap.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	boss_wrap.offset_top = 24
-	boss_wrap.offset_bottom = -700
+	boss_wrap.anchor_right = 1.0
+	boss_wrap.offset_top = 24.0
+	boss_wrap.offset_bottom = 112.0
 	boss_wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(boss_wrap)
 	boss_panel = PanelContainer.new()
@@ -212,6 +268,67 @@ func _build() -> void:
 	bv.add_child(boss_name)
 	boss_bar = UITheme.make_bar(Color(0.72, 0.16, 0.14), 500, 16)
 	bv.add_child(boss_bar)
+
+
+func _apply_safe_layout() -> void:
+	var margin := UITheme.safe_margin(get_viewport_rect().size.x)
+	if _safe_left != null:
+		_safe_left.position = Vector2(margin, -156.0)
+	if _safe_right != null:
+		_safe_right.position = Vector2(-250.0 - margin, margin)
+	if objective_panel != null:
+		objective_panel.position = Vector2(margin, margin)
+	if msg_box != null:
+		var message_y := margin
+		if objective_panel != null and objective_panel.visible:
+			message_y += objective_panel.size.y + 8.0
+		msg_box.position = Vector2(margin, message_y)
+
+func _localized(ko: String, en: String) -> String:
+	return ko if TranslationServer.get_locale().begins_with("ko") else en
+
+func set_objective(title: String, detail: String, progress_text: String = "") -> void:
+	objective_panel.visible = title != "" or detail != ""
+	objective_title.text = title if title != "" else _localized("현재 목표", "CURRENT OBJECTIVE")
+	objective_detail.text = detail
+	objective_progress.text = progress_text
+	objective_progress.visible = progress_text != ""
+	_apply_safe_layout.call_deferred()
+
+func set_action_hint(text: String) -> void:
+	if objective_action == null:
+		return
+	objective_action.text = text
+	objective_action.visible = text != ""
+	_apply_safe_layout.call_deferred()
+
+func set_action_feedback(text: String, is_success: bool = false) -> void:
+	if text == "":
+		clear_action_feedback()
+		return
+	var prefix := _localized("[완료] ", "[DONE] ") if is_success \
+		else _localized("[불가] ", "[UNAVAILABLE] ")
+	action_feedback.text = prefix + text
+	action_feedback.add_theme_color_override("font_color",
+		UITheme.SUCCESS if is_success else UITheme.DANGER_TEXT)
+	action_panel.add_theme_stylebox_override("panel", UITheme.feedback_box(is_success))
+	action_panel.modulate.a = 1.0
+	action_panel.visible = true
+	if _feedback_tween != null and _feedback_tween.is_valid():
+		_feedback_tween.kill()
+	_feedback_tween = action_panel.create_tween()
+	_feedback_tween.tween_interval(3.0)
+	_feedback_tween.tween_property(action_panel, "modulate:a", 0.0, 0.6)
+	_feedback_tween.tween_callback(clear_action_feedback)
+
+func clear_action_feedback() -> void:
+	if action_panel != null:
+		action_panel.visible = false
+		action_panel.modulate.a = 1.0
+
+func show_remote_building_limitation() -> void:
+	set_action_feedback(_localized("이 릴리스에서는 원격 건축을 지원하지 않습니다",
+		"Remote building is unavailable in this release"), false)
 
 func _process(_delta: float) -> void:
 	clock_label.text = "%s · %s" % [GameState.clock_string(), tr("UI_DAY") % GameState.day]
@@ -291,6 +408,8 @@ func _refresh_status() -> void:
 			"burning": col = Color(1.0, 0.5, 0.2)
 			"rested": col = UITheme.YELLOW
 		var l := UITheme.label(tr("STATUS_" + id.to_upper()), 14, col)
+		l.text = "[%s] %s" % [_localized("상태", "STATUS"), l.text]
+		l.tooltip_text = l.text
 		status_box.add_child(l)
 
 func _refresh_hotbar() -> void:
@@ -350,6 +469,7 @@ func _consume(i: int, id: String, it: Dictionary) -> void:
 			player.inventory.remove_at(i, 1)
 			Sfx.play("eat", -8.0)
 			push_message(tr("MSG_ATE") % ItemDB.name_of(id))
+			player.notify_food_eaten(id)
 	else:
 		push_message(tr("MSG_TOO_FULL"))
 		Sfx.play("error", -14.0)
@@ -374,14 +494,21 @@ func set_build_hint(text: String) -> void:
 func push_message(text: String, col: Color = UITheme.TEXT) -> void:
 	if text == "":
 		return
-	var l := UITheme.label(text, 17, col)
-	msg_box.add_child(l)
-	if msg_box.get_child_count() > 6:
+	var card := PanelContainer.new()
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_theme_stylebox_override("panel",
+		UITheme.panel_box(Color(0.055, 0.05, 0.045, 0.90), UITheme.GOLD_DIM, 4, 1))
+	var l := UITheme.wrap_label(text, 16, col)
+	l.max_lines_visible = 2
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.add_child(l)
+	msg_box.add_child(card)
+	if msg_box.get_child_count() > 3:
 		msg_box.get_child(0).queue_free()
-	var tw := l.create_tween()
+	var tw := card.create_tween()
 	tw.tween_interval(4.0)
-	tw.tween_property(l, "modulate:a", 0.0, 1.2)
-	tw.tween_callback(l.queue_free)
+	tw.tween_property(card, "modulate:a", 0.0, 1.0)
+	tw.tween_callback(card.queue_free)
 
 # ═══════════════════════════════════════════════ 보스 바
 func show_boss_bar(boss: Boss) -> void:

@@ -4,6 +4,8 @@ extends CharacterBody3D
 ## 지형 충돌이 아직 로드되지 않은 경우를 대비해 높이 질의로 바닥을 보정한다.
 
 signal died(enemy)
+signal semantic_event(event_id: String, data: Dictionary)
+signal greyling_defeated(data: Dictionary)
 
 enum St { IDLE, WANDER, CHASE, ATTACK, FLEE, DEAD }
 
@@ -23,6 +25,7 @@ var _telegraph := -1.0
 var _stagger_acc := 0.0
 var _stagger_time := 0.0
 var _dead := false
+var _greyling_defeat_emitted := false
 var _fade := 0.0
 var _hp_bar: Sprite3D
 var _hp_bar_timer := 0.0
@@ -631,6 +634,17 @@ func _die(killer) -> void:
 	collision_layer = 0
 	collision_mask = 0
 	GameState.stats["kills"] = int(GameState.stats["kills"]) + 1
+	if str(cfg.get("id", "")) == "greyling" and not _greyling_defeat_emitted \
+			and killer == GameState.player:
+		_greyling_defeat_emitted = true
+		# Stable scalar-only local defeat payload.
+		var defeat_data := {
+			"enemy_id": "greyling",
+			"local": true,
+			"killer_instance_id": int(killer.get_instance_id()),
+		}
+		semantic_event.emit("GREYLING_DEFEATED", defeat_data)
+		greyling_defeated.emit(defeat_data)
 	if _hp_bar:
 		_hp_bar.visible = false
 	if _tag:

@@ -17,9 +17,11 @@ var _mode := "craft"            # craft | upgrade
 
 func _ready() -> void:
 	name = "craft_ui"
-	custom_minimum_size = Vector2(880, 600)
+	custom_minimum_size = Vector2(820, 560)
 	add_theme_stylebox_override("panel",
 		UITheme.panel_box(Color(0.08, 0.07, 0.06, 0.97), UITheme.GOLD_DIM, 6, 3))
+	get_viewport().size_changed.connect(_apply_responsive_layout)
+	_apply_responsive_layout()
 	_build()
 
 func bind(p: Player, bs: BuildSystem) -> void:
@@ -51,7 +53,7 @@ func _build() -> void:
 	root.add_child(split)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(430, 470)
+	scroll.custom_minimum_size = Vector2(390, 430)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	split.add_child(scroll)
 	_list = VBoxContainer.new()
@@ -62,7 +64,7 @@ func _build() -> void:
 	var dpanel := PanelContainer.new()
 	dpanel.add_theme_stylebox_override("panel",
 		UITheme.panel_box(Color(0.12, 0.10, 0.08, 0.9)))
-	dpanel.custom_minimum_size = Vector2(390, 0)
+	dpanel.custom_minimum_size = Vector2(360, 0)
 	split.add_child(dpanel)
 	_detail = VBoxContainer.new()
 	_detail.add_theme_constant_override("separation", 8)
@@ -142,8 +144,8 @@ func _fill_upgrade() -> void:
 func _recipe_row(out_id: String, mats: Dictionary, ok: bool, amount: int,
 		override_name: String = "") -> Button:
 	var b := Button.new()
-	b.custom_minimum_size = Vector2(410, 52)
-	b.focus_mode = Control.FOCUS_NONE
+	b.custom_minimum_size = Vector2(370, 52)
+	b.focus_mode = Control.FOCUS_ALL
 	b.disabled = false
 	b.add_theme_color_override("font_color", UITheme.TEXT if ok else Color(0.55, 0.5, 0.45))
 
@@ -194,11 +196,18 @@ func _show_detail() -> void:
 	for c in _detail.get_children():
 		c.queue_free()
 	if _selected == "":
-		_detail.add_child(UITheme.label(tr("UI_SELECT_RECIPE"), 16, UITheme.TEXT_DIM))
+		var prompt := VBoxContainer.new()
+		prompt.add_theme_constant_override("separation", 10)
+		var prompt_title := UITheme.title(tr("UI_RECIPE_DETAILS"), 21)
+		prompt.add_child(prompt_title)
+		var prompt_body := UITheme.wrap_label(tr("UI_SELECT_RECIPE"), 16, UITheme.TEXT_DIM)
+		prompt_body.max_lines_visible = 3
+		prompt.add_child(prompt_body)
+		_detail.add_child(prompt)
 		return
 	var info := RichTextLabel.new()
 	info.bbcode_enabled = true
-	info.custom_minimum_size = Vector2(360, 380)
+	info.custom_minimum_size = Vector2(330, 340)
 	info.add_theme_font_override("normal_font", UITheme.body_font())
 	info.add_theme_font_size_override("normal_font_size", 15)
 	var q := 1
@@ -225,12 +234,15 @@ func _do_craft() -> void:
 		Sfx.play("error", -8.0)
 		GameState.msg(tr("MSG_NOT_ENOUGH"))
 		return
-	# 결과를 넣을 자리가 있는지 확인
-	player.inventory.consume(rec["mats"])
-	var left := player.inventory.add_item(_selected, int(rec.get("amount", 1)))
+	# 재료는 한 번만 소비하고 결과는 소지품 또는 소유된 드롭으로 전달한다.
+	if not player.inventory.consume(rec["mats"]):
+		return
+	var crafted_amount := int(rec.get("amount", 1))
+	var left := player.inventory.add_item(_selected, crafted_amount)
 	if left > 0:
 		ItemDrop.spawn(get_tree().current_scene,
 			player.global_position + Vector3(0, 1, 0), _selected, left)
+	player.notify_item_crafted(_selected, crafted_amount)
 	GameState.stats["crafted"] = int(GameState.stats["crafted"]) + 1
 	Sfx.play("craft", -6.0)
 	GameState.msg(tr("MSG_CRAFTED") % ItemDB.name_of(_selected))
@@ -268,3 +280,14 @@ func _do_upgrade() -> void:
 	Sfx.play("craft", -4.0, 0.85)
 	GameState.msg(tr("MSG_UPGRADED") % [ItemDB.name_of(_selected), q + 1])
 	refresh()
+
+func apply_responsive_layout() -> void:
+	_apply_responsive_layout()
+
+func _apply_responsive_layout() -> void:
+	var viewport_size := get_viewport_rect().size
+	var ui_scale := maxf(get_tree().root.content_scale_factor, 0.01)
+	var margin := UITheme.safe_margin(viewport_size.x)
+	var available := viewport_size / ui_scale - Vector2.ONE * margin * 2.0
+	custom_minimum_size = Vector2(minf(820.0, maxf(0.0, available.x)),
+		minf(560.0, maxf(0.0, available.y)))

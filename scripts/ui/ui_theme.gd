@@ -19,6 +19,11 @@ const RED := Color(0.78, 0.22, 0.20)
 const GREEN := Color(0.44, 0.72, 0.32)
 const BLUE := Color(0.36, 0.60, 0.82)
 const YELLOW := Color(0.88, 0.76, 0.30)
+const SUCCESS := Color(0.62, 0.82, 0.44)
+const WARNING := Color(1.0, 0.72, 0.32)
+const DANGER_TEXT := Color(1.0, 0.55, 0.48)
+const SAFE_MARGIN_SMALL := 24.0
+const SAFE_MARGIN_LARGE := 32.0
 
 static var _theme: Theme = null
 static var _body: FontFile = null
@@ -114,6 +119,20 @@ static func panel_box(bg: Color, border: Color = Color(0.30, 0.26, 0.20),
 	s.content_margin_bottom = 6
 	return s
 
+static func feedback_box(success: bool) -> StyleBoxFlat:
+	var border := SUCCESS if success else DANGER_TEXT
+	return panel_box(Color(0.07, 0.06, 0.05, 0.96), border, 4, 2)
+
+static func safe_margin(viewport_width: float) -> float:
+	return SAFE_MARGIN_LARGE if viewport_width >= 1600.0 else SAFE_MARGIN_SMALL
+
+static func wrap_label(text: String, size: int = 16, col: Color = TEXT) -> Label:
+	var l := label(text, size, col)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return l
+
 static func slot_box(highlight: bool = false, equipped: bool = false) -> StyleBoxFlat:
 	var s := StyleBoxFlat.new()
 	s.bg_color = SLOT_HL if highlight else SLOT
@@ -146,7 +165,7 @@ static func button(text: String, size: int = 17) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.add_theme_font_size_override("font_size", size)
-	b.focus_mode = Control.FOCUS_NONE
+	b.focus_mode = Control.FOCUS_ALL
 	return b
 
 ## 체력/스태미나 등에 쓰는 커스텀 바

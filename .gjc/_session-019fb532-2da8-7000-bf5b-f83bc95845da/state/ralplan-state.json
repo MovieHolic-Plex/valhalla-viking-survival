@@ -1,0 +1,26 @@
+{
+  "run_id": "019fb532-2da8-7000-bf5b-f83bc95845da",
+  "skill": "ralplan",
+  "active": true,
+  "current_phase": "critic",
+  "version": 2,
+  "updated_at": "2026-07-30T22:46:26.027Z",
+  "receipt": {
+    "version": 1,
+    "skill": "ralplan",
+    "owner": "gjc-runtime",
+    "command": "gjc ralplan persist-run-id",
+    "state_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb532-2da8-7000-bf5b-f83bc95845da\\state\\skill-active-state.json",
+    "storage_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb532-2da8-7000-bf5b-f83bc95845da\\state\\ralplan-state.json",
+    "mutated_at": "2026-07-30T22:46:26.027Z",
+    "fresh_until": "2026-07-30T23:16:26.027Z",
+    "status": "fresh",
+    "mutation_id": "ralplan:2026-07-30T22:46:26.027Z",
+    "content_sha256": {
+      "algorithm": "sha256",
+      "value": "d64958456fdad87b2d529c0db6344f0a1d20d0b2357114624c3b9de9021ce4d6",
+      "covered_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb532-2da8-7000-bf5b-f83bc95845da\\state\\ralplan-state.json",
+      "computed_at": "2026-07-30T22:46:26.028Z"
+    }
+  }
+}

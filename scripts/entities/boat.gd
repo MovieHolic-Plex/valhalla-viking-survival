@@ -155,18 +155,21 @@ func _build_hull(l: float, w: float, col: Color) -> void:
 
 # ═══════════════════════════════════════════════ 조종
 func can_interact(_p) -> bool:
-	return true
+	return not Net.is_online
 
 func prompt() -> String:
 	if pilot != null:
 		return tr("PROMPT_DISEMBARK")
 	return tr("PROMPT_EMBARK") % tr(str(cfg.get("n", "PIECE_RAFT")))
 
-func interact(player) -> void:
+func interact(player) -> Dictionary:
+	if Net.is_online:
+		return Net.unsupported_build_result()
 	if pilot != null:
 		_dismount()
 	else:
 		_mount(player)
+	return Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "")
 
 func _mount(player) -> void:
 	pilot = player
@@ -186,6 +189,9 @@ func _dismount() -> void:
 	_label.visible = false
 
 func _physics_process(delta: float) -> void:
+	if Net.is_online:
+		velocity = Vector3.ZERO
+		return
 	_wave_t += delta
 
 	if pilot != null and is_instance_valid(pilot):
@@ -260,6 +266,8 @@ func _read_controls(delta: float) -> void:
 # ═══════════════════════════════════════════════ 내구도
 func take_hit(dmg: Dictionary, from_pos: Vector3, _attacker = null,
 		_kb: float = 0.0) -> void:
+	if Net.is_online:
+		return
 	var total := 0.0
 	for k in dmg:
 		total += float(dmg[k])
@@ -269,6 +277,8 @@ func take_hit(dmg: Dictionary, from_pos: Vector3, _attacker = null,
 		_break()
 
 func _break() -> void:
+	if Net.is_online:
+		return
 	if pilot != null:
 		_dismount()
 	var mats: Dictionary = cfg.get("mats", {})

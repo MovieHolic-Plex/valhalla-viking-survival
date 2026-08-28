@@ -4,6 +4,13 @@ extends Node3D
 
 signal piece_selected(id: String)
 signal build_mode_changed(active: bool)
+signal placement_resolved(result: Dictionary)
+
+const FAULT_NONE := ""
+const FAULT_RESERVE := "reserve"
+const FAULT_CREATE := "create"
+const FAULT_ATTACH := "attach"
+const FAULT_EVIDENCE := "evidence"
 
 const GRID := 2.0             # 기본 격자(벽·바닥 크기)
 const FREE_SNAP := 0.5
@@ -23,6 +30,16 @@ var _place_xf := Transform3D.IDENTITY
 var _cooldown := 0.0
 var _mat_ok := MatLib.ghost(Color(0.30, 1.0, 0.45))
 var _mat_bad := MatLib.ghost(Color(1.0, 0.28, 0.22))
+var _injected_fault := FAULT_NONE
+var _placement_committing := false
+
+## 결정적 트랜잭션 결함 주입은 디버그 빌드에서만 사용할 수 있다.
+func set_placement_fault_for_debug(fault: String) -> bool:
+	if not OS.is_debug_build() or fault not in [FAULT_NONE, FAULT_RESERVE, FAULT_CREATE,
+			FAULT_ATTACH, FAULT_EVIDENCE]:
+		return false
+	_injected_fault = fault
+	return true
 
 func setup(p: Player) -> void:
 	player = p
@@ -32,14 +49,17 @@ func _process(delta: float) -> void:
 		_cooldown -= delta
 	if player == null or not is_instance_valid(player):
 		return
+	# 망치 장착 상태와 메뉴 입력 잠금은 별개다. 팔레트가 입력을 잠갔다고
+	# 건축 모드를 해제하면 열린 직후 스스로 닫히는 순환이 생긴다.
 	var want := player.inventory.equipped_id(Inventory.SLOT_RIGHT) == "hammer" \
-		and not player.input_locked and not player.stats.is_dead
+		and not player.stats.is_dead
 	if want != active:
 		active = want
 		build_mode_changed.emit(active)
 		if not active:
 			_clear_ghost()
-	if not active:
+	if not active or player.input_locked:
+		_clear_ghost()
 		return
 	_update_ghost()
 
@@ -48,10 +68,10 @@ func _process(delta: float) -> void:
 		Sfx.play("click", -18.0)
 	if Input.is_action_just_pressed("attack") and _cooldown <= 0.0:
 		_cooldown = 0.2
-		try_place()
+		try_place_result()
 	if Input.is_action_just_pressed("block") and _cooldown <= 0.0:
 		_cooldown = 0.2
-		try_remove()
+		try_remove_result()
 
 func select(id: String) -> void:
 	if not RecipeDB.pieces.has(id):
@@ -194,75 +214,163 @@ func _near_station(pos: Vector3) -> bool:
 
 # ═══════════════════════════════════════════════ 설치 / 철거
 func try_place() -> bool:
-	if not _valid:
-		Sfx.play("error", -14.0)
-		return false
+	return bool(try_place_result().get("accepted", false))
+
+func try_place_result() -> Dictionary:
+	# RT1 원격 호출은 로컬 검증/예약/생성보다 먼저 닫는다.
+	if Net.is_online and not Net.is_host:
+		return _resolve_placement(Net.unsupported_build_result("PLACE"), "PLACE")
+	if player == null or not is_instance_valid(player) or player.input_locked \
+			or player.stats == null or player.stats.is_dead:
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"INPUT_LOCKED", "PLACE"), "PLACE")
+	if _placement_committing:
+		var busy := Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"PLACEMENT_BUSY", "PLACE")
+		busy["operation"] = "PLACE"
+		return busy
+	var scene := get_tree().current_scene
+	if scene == null:
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"CREATE_FAILED", "PLACE"), "PLACE")
 	var d := RecipeDB.piece(current_id)
-	if not player.inventory.consume(d.get("mats", {})):
-		return false
-	# 배는 건축 조각이 아니라 탈것으로 만든다
+	if d.is_empty():
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"UNKNOWN_PIECE", "PLACE"), "PLACE")
+	# Boats have no RT1 persistence or replication contract. Reject before validation and reservation.
+	if d.has("boat") or str(d.get("kind", "")) == "boat":
+		return _resolve_placement(Net.unsupported_build_result("PLACE"), "PLACE")
+	if not _check_valid(d, _place_xf):
+		Sfx.play("error", -14.0)
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"INVALID_PLACEMENT", "PLACE"), "PLACE")
+
+	var mats: Dictionary = (d.get("mats", {}) as Dictionary).duplicate(true)
+	var reservation_id := Inventory.RESERVATION_INVALID
+	if _injected_fault != FAULT_RESERVE:
+		reservation_id = player.inventory.reserve_materials(mats)
+	if reservation_id == Inventory.RESERVATION_INVALID:
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"MISSING_MATERIALS", "PLACE"), "PLACE")
+
+	var candidate: Node3D = null
+	if _injected_fault != FAULT_CREATE:
+		candidate = _create_detached_candidate(current_id, d)
+	if candidate == null:
+		player.inventory.cancel_reservation(reservation_id)
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"CREATE_FAILED", "PLACE"), "PLACE")
+
+	# Evidence feasibility is checked while both resources remain detached and silent.
+	if _injected_fault == FAULT_EVIDENCE:
+		candidate.free()
+		player.inventory.cancel_reservation(reservation_id)
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"EVIDENCE_FAILED", "PLACE"), "PLACE")
+
+	# From here through publication the commit is non-yielding and reentrancy-guarded.
+	# No scene attachment, signal, registry entry, stat, evidence, SFX, or replication
+	# precedes completion of every fallible feasibility step.
+	_placement_committing = true
+	if not player.inventory.commit_reservation(reservation_id):
+		_placement_committing = false
+		candidate.free()
+		player.inventory.cancel_reservation(reservation_id)
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"COMMIT_FAILED", "PLACE"), "PLACE")
+	if _injected_fault == FAULT_ATTACH:
+		player.inventory.cancel_reservation(reservation_id)
+		candidate.free()
+		_placement_committing = false
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"ATTACH_FAILED", "PLACE"), "PLACE")
+
+	var piece := candidate as BuildPiece
+	_attach_committed_candidate(piece, _place_xf, scene)
+	piece.removed.connect(_on_piece_removed)
+	pieces.append(piece)
+	GameState.stats["built"] = int(GameState.stats.get("built", 0)) + 1
+	var published := player.inventory.publish_reservation(reservation_id)
+	assert(published)
+	_placement_committing = false
+	_publish_placement(piece, d)
+	return _resolve_placement(Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "", "PLACE"),
+		"PLACE")
+
+func _resolve_placement(result: Dictionary, operation: String) -> Dictionary:
+	var resolved := result.duplicate(true)
+	resolved["operation"] = operation
+	placement_resolved.emit(resolved)
+	return resolved
+
+func _create_detached_candidate(id: String, d: Dictionary) -> Node3D:
 	if d.has("boat"):
-		var boat := Boat.make(str(d["boat"]))
-		get_tree().current_scene.add_child(boat)
-		boat.global_position = Vector3(_place_xf.origin.x, Const.WATER_LEVEL,
-			_place_xf.origin.z)
-		boat.rotation.y = rot_step
-		GameState.stats["built"] = int(GameState.stats["built"]) + 1
-		Sfx.play_at("build", boat.global_position, get_tree().current_scene, -2.0)
-		return true
+		return Boat.make(str(d["boat"]))
+	return BuildPiece.make(id)
 
-	# 클라이언트는 직접 놓지 않고 호스트에 요청한다(호스트가 승인해 되돌려준다)
-	if Net.request_place(current_id, _place_xf.origin, rot_step):
-		GameState.stats["built"] = int(GameState.stats["built"]) + 1
-		Sfx.play_at("build", _place_xf.origin, get_tree().current_scene, -4.0)
-		return true
-
-	var piece := _spawn_piece(current_id, _place_xf.origin, rot_step)
-	piece.global_transform = _place_xf
+func _attach_committed_candidate(piece: BuildPiece, xf: Transform3D, scene: Node) -> void:
+	piece.transform = scene.global_transform.affine_inverse() * xf
 	piece.yaw = rot_step
-	GameState.stats["built"] = int(GameState.stats["built"]) + 1
-	Sfx.play_at("build", _place_xf.origin, get_tree().current_scene, -4.0)
-	Fx.burst(get_tree().current_scene, _place_xf.origin, Color(0.7, 0.6, 0.4), 10, 2.5,
-		0.06, 0.6)
-	recompute_support()
-	Net.piece_placed(piece)
-	return true
+	piece.owner_id = GameState.local_player_id
+	scene.add_child(piece)
 
-## 조각 하나를 실제로 만들어 씬에 넣는다. 로컬/원격 경로가 공유한다.
-func _spawn_piece(id: String, pos: Vector3, yaw: float) -> BuildPiece:
-	var piece := BuildPiece.make(id)
-	get_tree().current_scene.add_child(piece)
+func _publish_placement(piece: BuildPiece, _d: Dictionary) -> void:
+	Sfx.play_at("build", piece.global_position, get_tree().current_scene, -4.0)
+	Fx.burst(get_tree().current_scene, piece.global_position, Color(0.7, 0.6, 0.4), 10,
+		2.5, 0.06, 0.6)
+	recompute_support()
+	Net.project_committed_piece(piece)
+	player.notify_local_build(current_id, piece)
+
+## 권위자가 이미 커밋한 상태를 클라이언트에 읽기 전용으로 투영한다.
+func project_authority_snapshot(id: String, pos: Vector3, yaw: float,
+		owner_id: String) -> BuildPiece:
+	if Net.is_host or not Net.is_online or not RecipeDB.pieces.has(id) \
+			or not IdentityStore.is_uuid(owner_id):
+		return null
+	var d := RecipeDB.piece(id)
+	if d.has("boat") or str(d.get("kind", "")) == "boat":
+		return null
+	var piece := BuildPiece.make_authority_snapshot(id)
+	var scene := get_tree().current_scene
+	if scene == null:
+		piece.free()
+		return null
+	scene.add_child(piece)
 	piece.global_position = pos
 	piece.rotation.y = yaw
 	piece.yaw = yaw
+	piece.owner_id = owner_id
 	piece.removed.connect(_on_piece_removed)
 	pieces.append(piece)
 	return piece
 
-## 네트워크로 받은 배치. 자원 소모/유효성 검사 없이 그대로 재현한다.
-func place_remote(id: String, pos: Vector3, yaw: float) -> BuildPiece:
-	var piece := _spawn_piece(id, pos, yaw)
-	Sfx.play_at("build", pos, get_tree().current_scene, -8.0)
-	call_deferred("recompute_support")
-	return piece
-
 func try_remove() -> bool:
+	return bool(try_remove_result().get("accepted", false))
+
+func try_remove_result() -> Dictionary:
+	# 조준/조회조차 하기 전에 원격 변경을 닫는다.
+	if Net.is_online and not Net.is_host:
+		return _resolve_placement(Net.unsupported_build_result("REMOVE"), "REMOVE")
+	if player == null or not is_instance_valid(player) or player.input_locked \
+			or player.stats == null or player.stats.is_dead:
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"INPUT_LOCKED", "REMOVE"), "REMOVE")
 	var hit := _aim()
 	if hit.is_empty():
-		return false
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"NO_TARGET", "REMOVE"), "REMOVE")
 	var col = hit["collider"]
-	if col == null or not (col is BuildPiece):
-		return false
-	# 온라인이면 호스트가 판정해서 모두에게 알린다
-	if Net.is_online and col.net_id > 0:
-		Net.piece_removed(col)
-		if not Net.is_host:
-			return true
-		return true
+	if col == null or not (col is BuildPiece) or col.authority_snapshot:
+		return _resolve_placement(Net.build_result(false, Net.BUILD_STATUS_REJECTED,
+			"INVALID_TARGET", "REMOVE"), "REMOVE")
 	col.destroy(true)
-	return true
+	return _resolve_placement(Net.build_result(true, Net.BUILD_STATUS_ACCEPTED, "", "REMOVE"),
+		"REMOVE")
 
 func _on_piece_removed(p) -> void:
+	if is_instance_valid(p) and not bool(p.authority_snapshot):
+		Net.project_removed_piece(p)
 	pieces.erase(p)
 	call_deferred("recompute_support")
 
@@ -271,7 +379,7 @@ func _on_piece_removed(p) -> void:
 func recompute_support() -> void:
 	var live: Array[BuildPiece] = []
 	for p in pieces:
-		if is_instance_valid(p):
+		if is_instance_valid(p) and not p.authority_snapshot:
 			live.append(p)
 	pieces = live
 	if pieces.is_empty():
@@ -373,22 +481,90 @@ func station_level(station: String, pos: Vector3) -> int:
 func to_dict() -> Array:
 	var out: Array = []
 	for p in pieces:
-		if is_instance_valid(p):
-			out.append(p.to_dict())
+		if not is_instance_valid(p) or p.authority_snapshot:
+			continue
+		var row := p.to_dict()
+		if not row.is_empty():
+			out.append(row)
 	return out
 
-func from_dict(arr: Array) -> void:
+func from_dict(arr: Array) -> bool:
+	# Loading replaces authoritative world state and is never legal once a peer is online.
+	if Net.is_online:
+		push_error("Refusing build load while a multiplayer peer is active")
+		return false
+	var scene := get_tree().current_scene
+	if scene == null:
+		push_error("Refusing build load without an active scene")
+		return false
+	var rows: Array[Dictionary] = []
+	for value in arr:
+		if not (value is Dictionary):
+			push_error("Refusing non-dictionary build row")
+			return false
+		var d := value as Dictionary
+		if bool(d.get("authority_snapshot", false)):
+			push_error("Refusing authority snapshot row in build save")
+			return false
+		var id := str(d.get("id", ""))
+		var pp = d.get("p", [])
+		if not RecipeDB.pieces.has(id) or not (pp is Array) or pp.size() != 3:
+			push_error("Refusing malformed build row")
+			return false
+		if not _valid_loaded_piece_row(d):
+			push_error("Refusing invalid build row")
+			return false
+		rows.append(d)
+	var loaded: Array[BuildPiece] = []
+	for d in rows:
+		var piece := BuildPiece.make(str(d["id"]))
+		scene.add_child(piece)
+		if not piece.is_inside_tree():
+			piece.free()
+			_free_loaded_pieces(loaded)
+			return false
+		var pp: Array = d["p"]
+		piece.global_position = Vector3(float(pp[0]), float(pp[1]), float(pp[2]))
+		piece.rotation.y = float(d.get("y", 0.0))
+		if not piece.from_dict(d):
+			piece.get_parent().remove_child(piece)
+			piece.free()
+			_free_loaded_pieces(loaded)
+			return false
+		piece.removed.connect(_on_piece_removed)
+		loaded.append(piece)
+	# Register the complete replacement before mutating the live world. Roll back every
+	# newly allocated ID on any registration failure.
+	for piece in loaded:
+		if not Net.register_authoritative_piece(piece):
+			_unregister_loaded_pieces(loaded)
+			_free_loaded_pieces(loaded)
+			return false
+	_unregister_loaded_pieces(pieces)
 	for p in pieces:
 		if is_instance_valid(p):
 			p.queue_free()
-	pieces.clear()
-	for d in arr:
-		var piece := BuildPiece.make(str(d.get("id", "wood_floor")))
-		get_tree().current_scene.add_child(piece)
-		var pp: Array = d.get("p", [0, 0, 0])
-		piece.global_position = Vector3(float(pp[0]), float(pp[1]), float(pp[2]))
-		piece.rotation.y = float(d.get("y", 0.0))
-		piece.from_dict(d)
-		piece.removed.connect(_on_piece_removed)
-		pieces.append(piece)
+	pieces = loaded
 	call_deferred("recompute_support")
+	return true
+
+func _valid_loaded_piece_row(d: Dictionary) -> bool:
+	var pp: Array = d["p"]
+	for value in [pp[0], pp[1], pp[2], d.get("y", 0.0), d.get("hp", 0.0)]:
+		if not (value is int or value is float) or not is_finite(float(value)):
+			return false
+	var owner = d.get("owner_id", GameState.local_player_id)
+	return owner is String and IdentityStore.is_uuid(owner)
+
+func _unregister_loaded_pieces(loaded: Array[BuildPiece]) -> void:
+	for piece in loaded:
+		Net.unregister_authoritative_piece(piece)
+
+func _free_loaded_pieces(loaded: Array[BuildPiece]) -> void:
+	for piece in loaded:
+		if not is_instance_valid(piece):
+			continue
+		var parent := piece.get_parent()
+		if parent != null:
+			parent.remove_child(piece)
+		piece.free()

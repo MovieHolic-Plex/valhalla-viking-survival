@@ -5,8 +5,12 @@ extends PanelContainer
 const TILE := 32.0            # 지도 1픽셀 = 32m
 const TEX_SIZE := 256         # 월드 전체를 담는 텍스처 한 변
 
+const MAX_MAP_SIZE := 820.0
+const SAFE_MARGIN := 24.0
+
 var player: Player
 var _tex_rect: TextureRect
+var _holder: Control
 var _img: Image
 var _tex: ImageTexture
 var _marker_layer: Control
@@ -17,18 +21,19 @@ var _pins: Array = []
 
 func _ready() -> void:
 	name = "map_ui"
-	custom_minimum_size = Vector2(880, 860)
+	custom_minimum_size = Vector2(320, 320)
 	visible = false
 	add_theme_stylebox_override("panel",
 		UITheme.panel_box(Color(0.10, 0.09, 0.07, 0.98), UITheme.GOLD_DIM, 6, 3))
+	get_viewport().size_changed.connect(_fit_to_viewport)
 
 	var v := VBoxContainer.new()
 	add_child(v)
 	v.add_child(UITheme.title(tr("UI_MAP"), 26))
 
-	var holder := Control.new()
-	holder.custom_minimum_size = Vector2(860, 820)
-	v.add_child(holder)
+	_holder = Control.new()
+	_holder.custom_minimum_size = Vector2(300, 300)
+	v.add_child(_holder)
 
 	_img = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGBA8)
 	_img.fill(Color(0.06, 0.06, 0.07, 1.0))
@@ -39,13 +44,22 @@ func _ready() -> void:
 	_tex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_tex_rect.stretch_mode = TextureRect.STRETCH_SCALE
 	_tex_rect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	holder.add_child(_tex_rect)
+	_holder.add_child(_tex_rect)
 
 	_marker_layer = Control.new()
 	_marker_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_marker_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_marker_layer.draw.connect(_draw_markers)
-	holder.add_child(_marker_layer)
+	_holder.add_child(_marker_layer)
+	_fit_to_viewport()
+
+
+func _fit_to_viewport() -> void:
+	var available := get_viewport_rect().size - Vector2(SAFE_MARGIN, SAFE_MARGIN) * 2.0
+	var side := minf(MAX_MAP_SIZE, minf(available.x - 20.0, available.y - 52.0))
+	side = maxf(side, 256.0)
+	_holder.custom_minimum_size = Vector2(side, side)
+	custom_minimum_size = Vector2(side + 20.0, side + 52.0)
 
 func bind(p: Player) -> void:
 	player = p

@@ -1,0 +1,38 @@
+{
+  "skill": "ralplan",
+  "phase": "final",
+  "active": true,
+  "activated_at": "2026-07-31T09:55:57.660Z",
+  "updated_at": "2026-07-31T09:55:57.660Z",
+  "session_id": "019fb796-1720-7000-a281-8eda30adf256",
+  "hud": {
+    "version": 1,
+    "summary": "persisted final stage 5",
+    "chips": [
+      {
+        "label": "pending",
+        "value": "approval",
+        "priority": 5,
+        "severity": "warning"
+      },
+      {
+        "label": "stage",
+        "value": "final",
+        "priority": 10
+      },
+      {
+        "label": "iter",
+        "value": "1",
+        "priority": 30
+      },
+      {
+        "label": "stages",
+        "value": "I·F",
+        "priority": 35
+      }
+    ],
+    "updated_at": "2026-07-31T09:55:57.654Z"
+  },
+  "source_state_revision": 2,
+  "state_revision": 2
+}

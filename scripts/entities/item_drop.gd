@@ -13,6 +13,8 @@ var _spin := 0.0
 var _life := 0.0
 var _mi: MeshInstance3D
 
+var _evidence_id := ""
+
 const PICKUP_RADIUS := 1.9
 const MAX_LIFE := 1800.0     # 30분 뒤 소멸(월드 오염 방지)
 
@@ -24,6 +26,8 @@ static func spawn(parent: Node, pos: Vector3, id: String, amt: int, q: int = 1,
 	d.item_id = id
 	d.amount = amt
 	d.quality = q
+	d._evidence_id = "drop/%s/%s/%s/%s/%d" % [id, snappedf(pos.x, 0.01),
+		snappedf(pos.y, 0.01), snappedf(pos.z, 0.01), amt]
 	parent.add_child(d)
 	d.global_position = pos
 	d._vel = impulse
@@ -78,18 +82,23 @@ func _physics_process(delta: float) -> void:
 			if global_position.y < -200.0:
 				queue_free()
 
-## 플레이어가 근처에 오면 호출된다
+## 플레이어가 근처에 오면 호출된다. 실제 획득량으로 직접 알림을 발행한다.
 func try_pickup(player) -> bool:
 	if not is_instance_valid(player):
 		return false
+	var picked_id := item_id
+	var requested := amount
 	var inv = player.inventory
-	var left: int = inv.add_item(item_id, amount, quality)
-	if left == amount:
+	var left: int = inv.add_item(picked_id, requested, quality)
+	var picked := requested - left
+	if picked <= 0:
 		return false
 	amount = left
 	if amount <= 0:
 		queue_free()
-		return true
+	if player.has_method("notify_pickup"):
+		player.call_deferred("notify_pickup", picked_id, picked, "PICKUP",
+			_evidence_id + "/%d" % picked)
 	return true
 
 func label() -> String:

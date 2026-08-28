@@ -4,6 +4,7 @@ extends CharacterBody3D
 
 signal interact_target_changed(node)
 signal notify(text: String)
+signal semantic_event(event_id: String, data: Dictionary)
 
 const WALK := 3.6
 const RUN := 6.4
@@ -16,6 +17,20 @@ const MOUSE_SENS := 0.0026
 const INTERACT_RANGE := 4.5
 const PICKUP_RANGE := 2.1
 
+const STARTER_GRANT_VERSION := 1
+const STARTER_CONTENTS := {"club": 1, "wood": 10, "stone": 6, "raspberries": 5}
+const RT1_REST_SECONDS := 5.0
+const RT1_COMFORT_RANGE := 3.0
+const RT1_SHELTER_RANGE := 6.0
+const RT1_STATIONARY_SPEED := 0.05
+const RT1_STATIONARY_DISPLACEMENT := 0.10
+const RT1_SHELTER_REQUIREMENTS := {
+	"campfire": 1,
+	"workbench": 1,
+	"wood_floor": 1,
+	"wood_wall": 3,
+	"wood_roof": 2,
+}
 var inventory: Inventory
 var stats: PlayerStats
 var anim  # RigAnimator(코드 리그) 또는 GlbRig(GLB 리그) — 같은 인터페이스
@@ -54,10 +69,21 @@ var _wet_timer := 0.0
 var _near_fire := false
 var _comfort := 0
 var _rested_timer := 0.0
+var _rt1_rest_progress := 0.0
+var _rt1_load_block_frames := 0
+var _starter_grant_version := 0
+var _starter_provenance: Dictionary = {}
+var _loaded_from_save := false
+var _loading_inventory := false
+var _semantic_sequence := 0
+var _rest_sample_position := Vector3.ZERO
 var _biome_check := 0.0
 var _build_system = null
 var input_locked := false
 var _cam_shake := 0.0
+var mouse_sensitivity := MOUSE_SENS
+var invert_y := false
+var reduced_shake := false
 var _sit := false
 var terrain_mode := 0            # 0 평탄화 · 1 융기 · 2 굴착
 var _bobber: Bobber = null
@@ -65,6 +91,7 @@ var _cast_charge := 0.0
 const TERRAIN_MODE_KEY := ["MSG_HOE_LEVEL", "MSG_HOE_RAISE", "MSG_HOE_DIG"]
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_to_group("player")
 	collision_layer = Const.L_PLAYER
 	collision_mask = Const.L_WORLD | Const.L_BUILDING
@@ -118,16 +145,12 @@ func _ready() -> void:
 	cam.near = 0.12
 	spring.add_child(cam)
 
-	inventory.equipment_changed.connect(_refresh_equipment)
+	_rest_sample_position = global_position
+	inventory.equipment_changed.connect(_on_equipment_changed)
 	inventory.changed.connect(_on_inventory_changed)
 	GameState.player = self
 	_last_pos = global_position
 
-	# 시작 장비
-	inventory.add_item("club", 1)
-	inventory.add_item("wood", 10)
-	inventory.add_item("stone", 6)
-	inventory.add_item("raspberries", 5)
 	_refresh_equipment()
 
 func set_build_system(bs) -> void:
@@ -136,13 +159,114 @@ func set_build_system(bs) -> void:
 func get_inventory() -> Inventory:
 	return inventory
 
+## Applies an exact Main-reconciled starter delta atomically, then records provenance.
+func apply_starter_delta(delta: Dictionary, provenance: Dictionary = {}) -> bool:
+	if _starter_grant_version >= STARTER_GRANT_VERSION:
+		return delta.is_empty()
+	var exact := {}
+	for id in delta:
+		var amount := int(delta[id])
+		if id not in STARTER_CONTENTS or amount < 0 or not ItemDB.has_item(id):
+			return false
+		if amount > 0:
+			exact[id] = amount
+	var preflight := Inventory.new(inventory.cols, inventory.rows)
+	preflight.from_dict(inventory.to_dict())
+	for id in exact:
+		if preflight.add_item(id, int(exact[id])) != 0:
+			return false
+	for id in exact:
+		if inventory.add_item(id, int(exact[id])) != 0:
+			return false
+	_starter_grant_version = STARTER_GRANT_VERSION
+	_starter_provenance = provenance.duplicate(true)
+	return true
+
+## Durable keyed provenance may suppress delivery before Main reconciles it.
+func configure_starter_delivery(already_delivered: bool, provenance: Dictionary = {}) -> void:
+	if already_delivered:
+		_starter_grant_version = STARTER_GRANT_VERSION
+		_starter_provenance = provenance.duplicate(true)
+	else:
+		_starter_grant_version = 0
+		_starter_provenance.clear()
+
+## Emits `{item_id}` only after successful consumption.
+func notify_food_eaten(item_id: String) -> void:
+	_emit_semantic("FOOD_EATEN", {"item_id": item_id})
+
+## Emits `{item_id, amount}`; hammer also emits `HAMMER_CRAFTED`.
+func notify_item_crafted(item_id: String, amount: int = 1) -> void:
+	if amount <= 0:
+		return
+	_emit_semantic("ITEM_CRAFTED", {"item_id": item_id, "amount": amount})
+	if item_id == RecipeDB.RT1_HAMMER_ID:
+		_emit_semantic("HAMMER_CRAFTED", {"item_id": item_id, "amount": amount})
+
+## Authoritative acquisition payload: `{item_id, amount>0, source, eligible, evidence_id}`.
+func notify_acquisition(item_id: String, amount: int, source: String = "PICKUP",
+		evidence_id: String = "") -> void:
+	if amount <= 0:
+		return
+	var event_evidence_id := evidence_id
+	if event_evidence_id.is_empty():
+		event_evidence_id = "%s/%s/%d/%d" % [source.to_lower(), item_id,
+			inventory.count(item_id), amount]
+	_emit_semantic("RESOURCE_ACQUIRED", {
+		"item_id": item_id,
+		"amount": amount,
+		"source": source,
+		"eligible": source in ["GATHER", "PICKUP", "DROP_RECOVERY"],
+		"evidence_id": event_evidence_id,
+	})
+
+## Postcommit-only local build payload: `{piece_id, piece_position, local=true}`.
+func notify_local_build(piece_id: String, piece: Node3D = null) -> void:
+	if not _is_owned_authoritative_piece(piece) or str(piece.get_meta("piece_id", "")) != piece_id:
+		return
+	_reset_rested_qualification()
+	_emit_semantic("LOCAL_BUILD_COMMITTED", {
+		"piece_id": piece_id,
+		"piece_position": piece.global_position,
+		"local": true,
+		"owner_id": str(piece.get("owner_id")),
+	})
+
+func rt1_owned_build_counts(campfire_position: Vector3) -> Dictionary:
+	var counts := {}
+	for value in get_tree().get_nodes_in_group("build_piece"):
+		if not _is_owned_authoritative_piece(value):
+			continue
+		if value.global_position.distance_to(campfire_position) > RT1_SHELTER_RANGE:
+			continue
+		var piece_id := str(value.get_meta("piece_id", ""))
+		if piece_id in RT1_SHELTER_REQUIREMENTS:
+			counts[piece_id] = int(counts.get(piece_id, 0)) + 1
+	return counts
+
+func _is_owned_authoritative_piece(value: Variant) -> bool:
+	return is_instance_valid(value) and value is BuildPiece \
+		and not bool((value as BuildPiece).authority_snapshot) \
+		and (value as BuildPiece).owner_id == GameState.local_player_id
+
+## Central adapter forwards scalar `{enemy_id, local, killer_instance_id}` here.
+func notify_greyling_defeated(data: Dictionary) -> void:
+	_emit_semantic("GREYLING_DEFEATED", data)
+
+func _emit_semantic(event_id: String, data: Dictionary = {}) -> void:
+	_semantic_sequence += 1
+	var payload := data.duplicate(true)
+	payload["sequence"] = _semantic_sequence
+	semantic_event.emit(event_id, payload)
+
 # ═══════════════════════════════════════════════ 입력
 func _unhandled_input(event: InputEvent) -> void:
 	if input_locked or stats.is_dead:
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		yaw -= event.relative.x * MOUSE_SENS
-		pitch = clampf(pitch - event.relative.y * MOUSE_SENS, -1.30, 0.95)
+		yaw -= event.relative.x * mouse_sensitivity
+		var vertical: float = event.relative.y * mouse_sensitivity * (-1.0 if invert_y else 1.0)
+		pitch = clampf(pitch - vertical, -1.30, 0.95)
 	elif event.is_action_pressed("zoom_in"):
 		zoom = clampf(zoom - 0.5, 0.0, 9.0)
 	elif event.is_action_pressed("zoom_out"):
@@ -161,9 +285,13 @@ func _unhandled_input(event: InputEvent) -> void:
 			Sfx.play("click", -16.0)
 
 func _physics_process(delta: float) -> void:
+	if get_tree().paused:
+		_reset_rested_qualification()
+		return
 	if stats.is_dead:
 		velocity = Vector3.ZERO
 		anim.update(delta, 0.0, false, false, true)
+		_reset_rested_qualification()
 		return
 
 	_update_timers(delta)
@@ -176,6 +304,7 @@ func _physics_process(delta: float) -> void:
 	_update_combat(delta)
 	_update_interaction()
 	_auto_pickup()
+	_update_rt1_rested(delta)
 
 	var sp01: float = clampf(moving_speed / RUN, 0.0, 1.0)
 	anim.set_block(is_blocking, delta)
@@ -350,7 +479,16 @@ func _update_camera(delta: float) -> void:
 		cam.v_offset = 0.0
 
 func shake(amount: float) -> void:
-	_cam_shake = maxf(_cam_shake, amount)
+	var applied := amount * (0.25 if reduced_shake else 1.0)
+	_cam_shake = maxf(_cam_shake, applied)
+
+func apply_settings(values: Dictionary) -> void:
+	mouse_sensitivity = clampf(float(values.get("mouse_sensitivity", MOUSE_SENS)),
+		0.0005, 0.01)
+	invert_y = bool(values.get("invert_y", false))
+	reduced_shake = bool(values.get("reduced_shake", false))
+	if reduced_shake:
+		_cam_shake = minf(_cam_shake, 0.25)
 
 # ═══════════════════════════════════════════════ 환경
 func _update_environment(delta: float) -> void:
@@ -408,7 +546,7 @@ func _update_comfort(delta: float) -> void:
 	_near_fire = false
 	var seen: Dictionary = {}
 	for n in get_tree().get_nodes_in_group("comfort_source"):
-		if not is_instance_valid(n) or not (n is Node3D):
+		if not _is_owned_authoritative_piece(n):
 			continue
 		if n.global_position.distance_to(global_position) > 10.0:
 			continue
@@ -420,8 +558,131 @@ func _update_comfort(delta: float) -> void:
 		if bool(n.get_meta("fire", false)):
 			_near_fire = true
 	_comfort = comfort
-	if comfort > 0:
-		stats.add_status("rested", 60.0 + float(comfort) * 60.0, {"comfort": comfort})
+
+func _update_rt1_rested(delta: float) -> void:
+	if input_locked or get_tree().paused or _loading_inventory or stats.is_dead:
+		_reset_rested_qualification()
+		return
+	if _rt1_load_block_frames > 0:
+		_rt1_load_block_frames -= 1
+		_reset_rested_qualification()
+		return
+	var horizontal_velocity := Vector2(velocity.x, velocity.z).length()
+	var horizontal_displacement := Vector2(global_position.x - _rest_sample_position.x,
+		global_position.z - _rest_sample_position.z).length()
+	if horizontal_velocity > RT1_STATIONARY_SPEED \
+			or horizontal_displacement > RT1_STATIONARY_DISPLACEMENT:
+		_reset_rested_qualification()
+		return
+	var qualification := _rt1_rest_qualification()
+	if not bool(qualification.get("qualified", false)):
+		_reset_rested_qualification()
+		return
+	_rt1_rest_progress += delta
+	if _rt1_rest_progress < RT1_REST_SECONDS:
+		return
+	stats.add_status("rested", 60.0 + float(qualification["comfort"]) * 60.0,
+		{"comfort": int(qualification["comfort"])})
+	# Stable retryable threshold payload: `{seconds, comfort, campfire_id}`.
+	_emit_semantic("RESTED_APPLIED", {
+		"seconds": RT1_REST_SECONDS,
+		"comfort": int(qualification["comfort"]),
+		"campfire_id": int(qualification["campfire"].get_instance_id()),
+	})
+	_reset_rested_qualification()
+
+func _rt1_rest_qualification() -> Dictionary:
+	var campfire: Node3D = null
+	var comfort := 0
+	for source in get_tree().get_nodes_in_group("comfort_source"):
+		if not _is_owned_authoritative_piece(source):
+			continue
+		var distance: float = (source as Node3D).global_position.distance_to(global_position)
+		if distance <= RT1_COMFORT_RANGE:
+			comfort += int(source.get_meta("comfort", 0))
+		if distance <= RT1_COMFORT_RANGE and source.get_meta("piece_id", "") == "campfire" \
+				and bool(source.get_meta("fire", false)):
+			campfire = source
+	if campfire == null or comfort <= 0:
+		return {"qualified": false}
+	var counts := rt1_owned_build_counts(campfire.global_position)
+	for piece_id in RT1_SHELTER_REQUIREMENTS:
+		if int(counts.get(piece_id, 0)) < int(RT1_SHELTER_REQUIREMENTS[piece_id]):
+			return {"qualified": false}
+	if not _rt1_connected_shelter(campfire) or not _has_qualifying_shelter(campfire) \
+			or not _rt1_roof_ray_coverage(campfire):
+		return {"qualified": false}
+	return {"qualified": true, "comfort": comfort, "campfire": campfire}
+
+func _has_qualifying_shelter(campfire: Node3D) -> bool:
+	var has_roof := false
+	var wall_sides: Dictionary = {}
+	for value in get_tree().get_nodes_in_group("build_piece"):
+		if not _is_owned_authoritative_piece(value):
+			continue
+		if value.global_position.distance_to(campfire.global_position) > RT1_SHELTER_RANGE:
+			continue
+		var kind := str(value.data.get("kind", ""))
+		if kind in ["roof", "roof_top"] and value.global_position.y > campfire.global_position.y + 0.8:
+			has_roof = true
+		elif kind in ["wall", "wall_half", "door"]:
+			var offset: Vector3 = value.global_position - campfire.global_position
+			if absf(offset.x) >= absf(offset.z):
+				wall_sides["east" if offset.x >= 0.0 else "west"] = true
+			else:
+				wall_sides["south" if offset.z >= 0.0 else "north"] = true
+	return has_roof and wall_sides.size() >= 2
+
+func _rt1_connected_shelter(campfire: Node3D) -> bool:
+	var floor_piece: Node3D = null
+	var floor_distance := INF
+	var nearby: Array[Node3D] = []
+	for value in get_tree().get_nodes_in_group("build_piece"):
+		if not _is_owned_authoritative_piece(value):
+			continue
+		if value.global_position.distance_to(campfire.global_position) > RT1_SHELTER_RANGE:
+			continue
+		nearby.append(value)
+		if str(value.get_meta("piece_id", "")) == "wood_floor":
+			var distance: float = (value as Node3D).global_position.distance_to(campfire.global_position)
+			if distance < floor_distance:
+				floor_distance = distance
+				floor_piece = value
+	if floor_piece == null or floor_distance > 3.0:
+		return false
+	var connected_walls := 0
+	var connected_roofs := 0
+	for value in nearby:
+		var piece_id := str(value.get_meta("piece_id", ""))
+		var distance := value.global_position.distance_to(floor_piece.global_position)
+		if piece_id == "wood_wall" and distance <= 3.2:
+			connected_walls += 1
+		elif piece_id == "wood_roof" and distance <= 4.0 \
+				and value.global_position.y > floor_piece.global_position.y + 0.8:
+			connected_roofs += 1
+	return connected_walls >= 3 and connected_roofs >= 2
+
+func _rt1_roof_ray_coverage(campfire: Node3D) -> bool:
+	var space := get_world_3d().direct_space_state
+	var covered := 0
+	var offsets := [Vector3.ZERO, Vector3(0.5, 0, 0), Vector3(-0.5, 0, 0),
+		Vector3(0, 0, 0.5), Vector3(0, 0, -0.5)]
+	for offset in offsets:
+		var start: Vector3 = campfire.global_position + offset + Vector3.UP * 0.35
+		var query := PhysicsRayQueryParameters3D.create(start, start + Vector3.UP * RT1_SHELTER_RANGE)
+		query.collision_mask = Const.L_BUILDING
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			continue
+		var collider = hit.get("collider")
+		if _is_owned_authoritative_piece(collider) \
+				and str((collider as BuildPiece).data.get("kind", "")) in ["roof", "roof_top"]:
+			covered += 1
+	return covered >= 4
+
+func _reset_rested_qualification() -> void:
+	_rt1_rest_progress = 0.0
+	_rest_sample_position = global_position
 
 func _update_map_discovery() -> void:
 	var tile := Vector2i(int(global_position.x / 32.0), int(global_position.z / 32.0))
@@ -431,6 +692,8 @@ func _update_map_discovery() -> void:
 
 # ═══════════════════════════════════════════════ 전투
 func _update_combat(delta: float) -> void:
+	if Input.is_action_just_pressed("attack") and not input_locked:
+		_reset_rested_qualification()
 	if input_locked:
 		is_blocking = false
 		_bow_drawing = false
@@ -480,6 +743,8 @@ func _start_melee(id: String, item: Dictionary) -> void:
 	if not stats.use_stamina(cost):
 		Sfx.play("error", -14.0)
 		return
+	_reset_rested_qualification()
+	_emit_semantic("LOCAL_ATTACK", {"item_id": id})
 	_attack_cd = 1.0 / maxf(spd, 0.2)
 	var kind := "slash"
 	var skill := int(item.get("skill", Const.Skill.UNARMED)) if not item.is_empty() \
@@ -669,6 +934,8 @@ func _cast_staff(id: String, item: Dictionary) -> void:
 		GameState.msg(tr("MSG_NOT_ENOUGH_EITR"))
 		Sfx.play("error", -12.0)
 		return
+	_reset_rested_qualification()
+	_emit_semantic("LOCAL_ATTACK", {"item_id": id})
 	_attack_cd = 1.0 / maxf(float(item.get("spd", 0.9)), 0.2)
 	anim.attack("stab")
 	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
@@ -716,6 +983,8 @@ func _release_arrow(bow_id: String, item: Dictionary) -> void:
 		return
 	if not inventory.remove_item(ammo, 1):
 		return
+	_reset_rested_qualification()
+	_emit_semantic("LOCAL_ATTACK", {"item_id": bow_id})
 	var q := inventory.equipped_quality(Inventory.SLOT_RIGHT)
 	var dmg := ItemDB.total_damage(bow_id, q)
 	var adm: Dictionary = ItemDB.get_item(ammo).get("dmg", {})
@@ -774,6 +1043,8 @@ func take_hit(dmg: Dictionary, from_pos: Vector3, attacker = null,
 			dmg[k] = float(dmg[k]) * 0.35
 	var taken := stats.take_damage(dmg, inventory.total_armor(), inventory.resistances())
 	if taken > 0.0:
+		_reset_rested_qualification()
+		_emit_semantic("LOCAL_DAMAGE_TAKEN", {"amount": taken})
 		anim.hit()
 		shake(clampf(taken / 30.0, 0.2, 1.2))
 		Sfx.play_at("hurt", global_position, get_tree().current_scene, -4.0)
@@ -849,16 +1120,24 @@ func _auto_pickup() -> void:
 		if not is_instance_valid(d):
 			continue
 		if d.global_position.distance_to(global_position) < PICKUP_RANGE:
-			if d.try_pickup(self):
-				notify_pickup(d.item_id, d.amount if d.amount > 0 else 1)
+			d.try_pickup(self)
 
-func notify_pickup(id: String, amount: int) -> void:
+func notify_pickup(id: String, amount: int, source: String = "PICKUP",
+		evidence_id: String = "") -> void:
 	notify.emit("+%d %s" % [amount, ItemDB.name_of(id)])
 	Sfx.play("pickup", -12.0)
+	notify_acquisition(id, amount, source, evidence_id)
 
 # ═══════════════════════════════════════════════ 장비 표시
 func _on_inventory_changed() -> void:
 	pass
+
+func _on_equipment_changed() -> void:
+	_refresh_equipment()
+	if _loading_inventory:
+		return
+	if inventory.equipped_id(Inventory.SLOT_RIGHT) == RecipeDB.RT1_HAMMER_ID:
+		_emit_semantic("HAMMER_EQUIPPED", {"item_id": RecipeDB.RT1_HAMMER_ID})
 
 func _refresh_equipment() -> void:
 	if _weapon_mi and is_instance_valid(_weapon_mi):
@@ -979,6 +1258,7 @@ func _tint_armor() -> void:
 # ═══════════════════════════════════════════════ 사망
 func _on_died() -> void:
 	GameState.stats["deaths"] = int(GameState.stats["deaths"]) + 1
+	_reset_rested_qualification()
 	Sfx.play("death", -2.0)
 	# 무덤 생성 후 소지품 전부 이전
 	var tomb := Tombstone.new()
@@ -1004,12 +1284,24 @@ func to_dict() -> Dictionary:
 		"yaw": yaw,
 		"inv": inventory.to_dict(),
 		"stats": stats.to_dict(),
+		"starter_grant_version": _starter_grant_version,
+		"starter_provenance": _starter_provenance.duplicate(true),
 	}
 
 func from_dict(d: Dictionary) -> void:
+	_loaded_from_save = true
 	var p: Array = d.get("pos", [0, 60, 0])
 	global_position = Vector3(float(p[0]), float(p[1]), float(p[2]))
 	yaw = float(d.get("yaw", 0.0))
+	_loading_inventory = true
 	inventory.from_dict(d.get("inv", {}))
+	_loading_inventory = false
 	stats.from_dict(d.get("stats", {}))
+	# Legacy saves predate provenance but already received the historical starter grant.
+	_starter_grant_version = int(d.get("starter_grant_version", STARTER_GRANT_VERSION))
+	var provenance = d.get("starter_provenance", {})
+	_starter_provenance = provenance.duplicate(true) if provenance is Dictionary else {}
+	# `rt1_rested_applied` is a legacy one-shot key and is intentionally ignored.
+	_reset_rested_qualification()
+	_rt1_load_block_frames = 2
 	_refresh_equipment()

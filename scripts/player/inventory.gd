@@ -20,6 +20,14 @@ var slots: Array = []            # [{id, amount, quality}] 또는 {}
 var equipped: Dictionary = {}    # slot 이름 -> 인벤토리 인덱스(-1 없음)
 var max_weight := 300.0
 
+const RESERVATION_INVALID := 0
+const RESERVATION_INITIAL := 0
+const _RESERVED := 1
+const _COMMITTED := 2
+
+var _next_reservation_id := RESERVATION_INITIAL
+var _material_reservations: Dictionary = {}
+
 func _init(c: int = Const.INV_COLS, r: int = Const.INV_ROWS) -> void:
 	cols = c
 	rows = r
@@ -128,6 +136,8 @@ func clear_all() -> void:
 		slots[i] = {}
 	for k in equipped:
 		equipped[k] = -1
+	_material_reservations.clear()
+	_next_reservation_id = RESERVATION_INITIAL
 	changed.emit()
 	equipment_changed.emit()
 
@@ -138,11 +148,118 @@ func has_materials(mats: Dictionary) -> bool:
 			return false
 	return true
 
-func consume(mats: Dictionary) -> bool:
-	if not has_materials(mats):
+## 재료를 눈에 보이게 변경하지 않고 정확한 수량을 예약한다. 0은 예약 실패다.
+func reserve_materials(mats: Dictionary) -> int:
+	var exact := _normalize_materials(mats)
+	if exact.is_empty() and not mats.is_empty():
+		return RESERVATION_INVALID
+	for id in exact:
+		if _available_material_count(id) < int(exact[id]):
+			return RESERVATION_INVALID
+	_next_reservation_id += 1
+	_material_reservations[_next_reservation_id] = {
+		"state": _RESERVED,
+		"mats": exact,
+	}
+	return _next_reservation_id
+
+## 예약분을 조용히 차감한다. publish_reservation 전에는 어떤 신호도 내보내지 않는다.
+func commit_reservation(reservation_id: int) -> bool:
+	var reservation: Dictionary = _material_reservations.get(reservation_id, {})
+	if reservation.is_empty() or int(reservation.get("state", 0)) != _RESERVED:
 		return false
+	var mats: Dictionary = reservation["mats"]
+	if not _has_unreserved_materials(mats, reservation_id):
+		return false
+	reservation["slots_before"] = slots.duplicate(true)
+	reservation["equipped_before"] = equipped.duplicate(true)
+	var equipment_changed_silently := false
 	for id in mats:
-		remove_item(id, int(mats[id]))
+		var left := int(mats[id])
+		for i in slots.size():
+			if left <= 0:
+				break
+			var slot: Dictionary = slots[i]
+			if slot.is_empty() or str(slot.get("id", "")) != id:
+				continue
+			var take := mini(int(slot.get("amount", 0)), left)
+			slot["amount"] = int(slot["amount"]) - take
+			left -= take
+			if int(slot["amount"]) <= 0:
+				slots[i] = {}
+				for equipment_slot in equipped:
+					if int(equipped[equipment_slot]) == i:
+						equipped[equipment_slot] = -1
+						equipment_changed_silently = true
+	reservation["equipment_changed"] = equipment_changed_silently
+	reservation["state"] = _COMMITTED
+	_material_reservations[reservation_id] = reservation
+	return true
+
+## 커밋된 예약의 단일 변경 알림을 발행하고 토큰을 닫는다.
+func publish_reservation(reservation_id: int) -> bool:
+	var reservation: Dictionary = _material_reservations.get(reservation_id, {})
+	if reservation.is_empty() or int(reservation.get("state", 0)) != _COMMITTED:
+		return false
+	# Close the token only after every precondition has passed. Signal emission is the
+	# irreversible publication boundary; callers may still rollback before this point.
+	_material_reservations.erase(reservation_id)
+	changed.emit()
+	if bool(reservation.get("equipment_changed", false)):
+		equipment_changed.emit()
+	return true
+
+## 미커밋 예약을 취소하거나 커밋을 신호 없이 원상 복구한다.
+func cancel_reservation(reservation_id: int) -> bool:
+	var reservation: Dictionary = _material_reservations.get(reservation_id, {})
+	if reservation.is_empty():
+		return false
+	if int(reservation.get("state", 0)) == _COMMITTED:
+		slots = (reservation["slots_before"] as Array).duplicate(true)
+		equipped = (reservation["equipped_before"] as Dictionary).duplicate(true)
+	_material_reservations.erase(reservation_id)
+	return true
+
+func _normalize_materials(mats: Dictionary) -> Dictionary:
+	var exact := {}
+	for raw_id in mats:
+		var id := str(raw_id)
+		var amount := int(mats[raw_id])
+		if id == "" or amount <= 0 or not ItemDB.has_item(id):
+			return {}
+		exact[id] = int(exact.get(id, 0)) + amount
+	return exact
+
+func _available_material_count(id: String) -> int:
+	var available := count(id)
+	for reservation in _material_reservations.values():
+		if int(reservation.get("state", 0)) == _RESERVED:
+			available -= int((reservation.get("mats", {}) as Dictionary).get(id, 0))
+	return available
+
+func _has_unreserved_materials(mats: Dictionary, own_reservation_id: int) -> bool:
+	for id in mats:
+		var available := count(id)
+		for other_id in _material_reservations:
+			if int(other_id) == own_reservation_id:
+				continue
+			var other: Dictionary = _material_reservations[other_id]
+			if int(other.get("state", 0)) == _RESERVED:
+				available -= int((other.get("mats", {}) as Dictionary).get(id, 0))
+		if available < int(mats[id]):
+			return false
+	return true
+
+func consume(mats: Dictionary) -> bool:
+	var reservation_id := reserve_materials(mats)
+	if reservation_id == RESERVATION_INVALID:
+		return false
+	if not commit_reservation(reservation_id):
+		cancel_reservation(reservation_id)
+		return false
+	if not publish_reservation(reservation_id):
+		cancel_reservation(reservation_id)
+		return false
 	return true
 
 func missing(mats: Dictionary) -> Dictionary:
@@ -299,6 +416,8 @@ func to_dict() -> Dictionary:
 func from_dict(d: Dictionary) -> void:
 	cols = int(d.get("cols", cols))
 	rows = int(d.get("rows", rows))
+	_material_reservations.clear()
+	_next_reservation_id = RESERVATION_INITIAL
 	var src: Array = d.get("slots", [])
 	slots.resize(cols * rows)
 	for i in slots.size():

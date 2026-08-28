@@ -12,6 +12,9 @@ var _pool3d: Array[AudioStreamPlayer3D] = []
 var _i2 := 0
 var _i3 := 0
 var master_volume := 0.8
+var sfx_volume := 0.8
+var ambient_volume := 0.8
+var _ambient_ids := {"wind": true, "fire": true, "smelt": true}
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -29,6 +32,42 @@ func _ready() -> void:
 		add_child(p3)
 		_pool3d.append(p3)
 
+func configure(master: float, effects: float, ambient: float) -> void:
+	master_volume = clampf(master, 0.0, 1.0)
+	sfx_volume = clampf(effects, 0.0, 1.0)
+	ambient_volume = clampf(ambient, 0.0, 1.0)
+	_apply_ambient_players.call_deferred()
+
+func sfx_volume_db(volume_db: float = 0.0) -> float:
+	return _scaled_db(volume_db, master_volume * sfx_volume)
+
+func ambient_volume_db(volume_db: float = 0.0) -> float:
+	return _scaled_db(volume_db, master_volume * ambient_volume)
+
+func apply_ambient(player: AudioStreamPlayer, volume_db: float = 0.0) -> void:
+	if player == null:
+		return
+	if not player.has_meta("settings_ambient_base_db"):
+		player.set_meta("settings_ambient_base_db", volume_db)
+	var base_db := float(player.get_meta("settings_ambient_base_db"))
+	player.volume_db = ambient_volume_db(base_db)
+
+func _apply_ambient_players() -> void:
+	if not is_inside_tree() or get_tree().current_scene == null:
+		return
+	var ambient_streams: Array = []
+	for id in _ambient_ids:
+		if _cache.has(id):
+			ambient_streams.append(_cache[id])
+	if ambient_streams.is_empty():
+		return
+	for node in get_tree().current_scene.find_children("*", "AudioStreamPlayer", true, false):
+		if node is AudioStreamPlayer and node.stream in ambient_streams:
+			apply_ambient(node, node.volume_db)
+
+func _scaled_db(volume_db: float, scale: float) -> float:
+	return -80.0 if scale <= 0.0 else volume_db + linear_to_db(scale)
+
 # ────────────────────────────────────────────────── 재생
 func play(id: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	var s := stream_for(id)
@@ -37,7 +76,7 @@ func play(id: String, volume_db: float = 0.0, pitch: float = 1.0) -> void:
 	var p := _pool2d[_i2]
 	_i2 = (_i2 + 1) % POOL_2D
 	p.stream = s
-	p.volume_db = volume_db + linear_to_db(master_volume)
+	p.volume_db = ambient_volume_db(volume_db) if _ambient_ids.has(id) else sfx_volume_db(volume_db)
 	p.pitch_scale = clampf(pitch * randf_range(0.95, 1.05), 0.2, 3.0)
 	p.play()
 
@@ -51,7 +90,7 @@ func play_at(id: String, pos: Vector3, parent: Node, volume_db: float = 0.0,
 	if p.get_parent() != self:
 		p.reparent(self)
 	p.stream = s
-	p.volume_db = volume_db + linear_to_db(master_volume)
+	p.volume_db = ambient_volume_db(volume_db) if _ambient_ids.has(id) else sfx_volume_db(volume_db)
 	p.pitch_scale = clampf(pitch * randf_range(0.92, 1.08), 0.2, 3.0)
 	p.global_position = pos
 	p.play()
@@ -61,6 +100,8 @@ func stream_for(id: String) -> AudioStreamWAV:
 		return _cache[id]
 	var s := _synth(id)
 	_cache[id] = s
+	if _ambient_ids.has(id):
+		_apply_ambient_players.call_deferred()
 	return s
 
 # ────────────────────────────────────────────────── 합성

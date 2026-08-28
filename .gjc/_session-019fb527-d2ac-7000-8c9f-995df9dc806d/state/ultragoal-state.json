@@ -1,0 +1,67 @@
+{
+  "active": true,
+  "version": 2,
+  "current_phase": "active",
+  "skill": "ultragoal",
+  "cwd": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival",
+  "updated_at": "2026-07-31T23:10:49.591Z",
+  "session_id": "019fb527-d2ac-7000-8c9f-995df9dc806d",
+  "receipt": {
+    "version": 1,
+    "skill": "ultragoal",
+    "owner": "gjc-runtime",
+    "command": "gjc ultragoal (reconcile)",
+    "state_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\state\\skill-active-state.json",
+    "storage_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\state\\ultragoal-state.json",
+    "mutated_at": "2026-07-31T23:10:49.591Z",
+    "fresh_until": "2026-07-31T23:40:49.591Z",
+    "status": "fresh",
+    "mutation_id": "ultragoal:reconcile:2026-07-31T23:10:49.591Z",
+    "verb": "reconcile",
+    "from_phase": "active",
+    "to_phase": "active",
+    "forced": true,
+    "content_sha256": {
+      "algorithm": "sha256",
+      "value": "eb3dd84103abed32c975145e7ef168b3fa3feb88bcdbad741a8f1f17820dc923",
+      "covered_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\state\\ultragoal-state.json",
+      "computed_at": "2026-07-31T23:10:49.593Z"
+    }
+  },
+  "status": "active",
+  "goals": [
+    {
+      "id": "G001",
+      "title": "# Final Pending-Approval Plan — Solo Gameplay/UI/UX RT1 (Stage 5)",
+      "status": "active"
+    }
+  ],
+  "counts": {
+    "pending": 0,
+    "active": 1,
+    "complete": 0,
+    "failed": 0,
+    "blocked": 0,
+    "review_blocked": 0,
+    "superseded": 0
+  },
+  "ledger_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\ultragoal\\ledger.jsonl",
+  "brief_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\ultragoal\\brief.md",
+  "goals_path": "C:\\Users\\USER\\Downloads\\valhalla-viking-survival\\.gjc\\_session-019fb527-d2ac-7000-8c9f-995df9dc806d\\ultragoal\\goals.json",
+  "handoff_to": "ralplan",
+  "handoff_at": "2026-07-30T22:33:11.054Z",
+  "active_goal_id": "G001",
+  "gjc_objective": "Complete the durable ultragoal plan in .gjc/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .gjc/ultragoal/ledger.jsonl as the audit trail.",
+  "nudge_budget": 10,
+  "nudge_count": 0,
+  "nudge_remaining": 10,
+  "nudge_goal_id": "G001",
+  "nudge_target_kind": "story",
+  "latestLedgerEvent": {
+    "event": "steering_accepted",
+    "timestamp": "2026-07-31T17:23:40.163Z",
+    "kind": "annotate_ledger",
+    "evidence": "G001 native executor batch: Core owns scripts/core/save_system.gd, scripts/core/game_state.gd and new json/identity/onboarding stores; Build owns scripts/core/net.gd, scripts/building/build_system.gd, scripts/building/build_piece.gd, scripts/player/inventory.gd; UI owns scripts/ui/ui_root.gd, scripts/ui/hud.gd, scripts/ui/build_ui.gd, scripts/ui/ui_theme.gd and new interaction_mode_controller.gd; Progression owns scripts/player/player.gd, scripts/core/recipe_db.gd, scripts/core/loc.gd, scripts/entities/enemy.gd. Slices are disjoint; IRC is allowed only for API coordination; unexpected shared-file need must be escalated to 0-Main before editing. Workers return changed-file and design evidence and terminal status, but run no tests/formatters and never mutate .gjc or goal state."
+  },
+  "state_revision": 9
+}

@@ -5,7 +5,7 @@ extends Node
 ##  - 월드는 시드로 결정되므로 지형·자원 배치는 전송하지 않는다. 시드만 보낸다.
 ##  - 몬스터·시간은 호스트만 시뮬레이션하고 결과 좌표만 뿌린다.
 ##  - 각 플레이어의 위치/자세는 본인이 보내고 나머지가 받는다.
-##  - 건축·지형 변형은 클라이언트가 "요청"하고 호스트가 승인 후 브로드캐스트한다.
+##  - RT1 건축 변경은 오프라인/호스트 로컬 전용이다. 클라이언트에는 권위 스냅샷만 투영한다.
 ##
 ## 오프라인이면 is_online == false 라서 아래 모든 경로가 그대로 no-op 이 되고
 ## 싱글플레이 동작에는 아무 영향이 없다.
@@ -15,10 +15,24 @@ signal peer_left(id: int)
 signal chat_received(pname: String, text: String)
 signal connection_failed()
 signal world_received(sv: int, time: float, day: int, mods: Array)
+signal build_request_rejected(result: Dictionary)
 
 const DEFAULT_PORT := 27015
 const MAX_PEERS := 9
 const SYNC_HZ := 15.0
+const BUILD_STATUS_REJECTED := "REJECTED"
+const BUILD_STATUS_ACCEPTED := "ACCEPTED"
+const BUILD_REASON_UNSUPPORTED_RT1 := "UNSUPPORTED_IN_RT1"
+
+static func build_result(accepted: bool, status: String, reason: String,
+		operation: String = "") -> Dictionary:
+	var result := {"accepted": accepted, "status": status, "reason": reason}
+	if operation != "":
+		result["operation"] = operation
+	return result
+
+static func unsupported_build_result(operation: String = "") -> Dictionary:
+	return build_result(false, BUILD_STATUS_REJECTED, BUILD_REASON_UNSUPPORTED_RT1, operation)
 
 var is_online := false
 var is_host := false
@@ -94,6 +108,7 @@ func host_game(port: int = DEFAULT_PORT, pname: String = "") -> bool:
 		my_name = pname
 	peer_names.clear()
 	peer_names[1] = my_name
+	_register_existing_authoritative_pieces()
 	GameState.msg(tr("MSG_NET_HOSTING") % port)
 	if upnp_enabled:
 		_open_upnp_async(port)
@@ -147,6 +162,15 @@ func join_game(ip: String, port: int = DEFAULT_PORT, pname: String = "") -> bool
 	return true
 
 func leave() -> void:
+	# Client replicas are visual-only and must not survive a network lifecycle transition.
+	# Authoritative pieces remain in the world but release their session-scoped IDs.
+	for piece in net_pieces.values():
+		if not is_instance_valid(piece):
+			continue
+		if bool(piece.get("authority_snapshot")):
+			piece.remove_authority_snapshot(true)
+		else:
+			piece.net_id = 0
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = null
@@ -225,11 +249,12 @@ func _register(pname: String) -> void:
 	peer_joined.emit(id, pname)
 	GameState.msg(tr("MSG_NET_JOINED_PEER") % pname)
 	_roster.rpc(peer_names)
-	# 이미 놓여 있는 건축물을 새 접속자에게 재현시킨다
+	# 이미 놓여 있는 권위 건축물의 읽기 전용 스냅샷을 새 접속자에게 투영한다.
 	for nid in net_pieces:
 		var p = net_pieces[nid]
 		if is_instance_valid(p):
-			_place_piece.rpc_id(id, nid, p.piece_id, p.global_position, p.rotation.y)
+			_project_piece_snapshot.rpc_id(id, nid, p.piece_id, p.global_position, p.rotation.y,
+				p.owner_id)
 	# 접속 전에 이미 살아 있던 몬스터도 마찬가지로 재현시킨다.
 	# (register_enemy 는 스폰 순간에만 뿌리므로 늦게 들어온 피어에겐 안 보인다)
 	for nid2 in net_enemies:
@@ -386,80 +411,113 @@ func _request_hit(nid: int, dmg: Dictionary, from_pos: Vector3, kb: float) -> vo
 		e.take_hit(dmg, from_pos, null, kb)
 
 # ═══════════════════════════════════════════════ 건축
-## 호스트에서 건축물이 놓였을 때 호출. 모두에게 재현시킨다.
-func piece_placed(piece) -> void:
-	if not is_online or not is_host or piece == null:
-		return
+## Registers an authoritative piece without broadcasting or gameplay evidence.
+func register_authoritative_piece(piece) -> bool:
+	if is_online and not is_host:
+		return false
+	if piece == null or bool(piece.get("authority_snapshot")) or piece.net_id != 0:
+		return false
 	var nid := new_net_id()
 	piece.net_id = nid
 	net_pieces[nid] = piece
-	_place_piece.rpc(nid, piece.piece_id, piece.global_position, piece.rotation.y)
-
-## 클라이언트가 건축을 시도할 때. true 를 반환하면 로컬 생성을 건너뛴다.
-func request_place(piece_id: String, pos: Vector3, yaw: float) -> bool:
-	if not is_online or is_host:
-		return false
-	_request_place.rpc_id(1, piece_id, pos, yaw)
 	return true
 
+func unregister_authoritative_piece(piece) -> void:
+	if piece == null or piece.net_id <= 0:
+		return
+	var nid: int = piece.net_id
+	if net_pieces.get(nid) == piece:
+		net_pieces.erase(nid)
+	piece.net_id = 0
+
+func _register_existing_authoritative_pieces() -> void:
+	var scene := get_tree().current_scene
+	if scene == null:
+		return
+	for piece in scene.get_tree().get_nodes_in_group("build_piece"):
+		if not is_instance_valid(piece) or bool(piece.get("authority_snapshot")):
+			continue
+		if piece.owner_id == "":
+			piece.owner_id = GameState.local_player_id
+		if piece.net_id == 0:
+			register_authoritative_piece(piece)
+
+## 호스트 로컬 커밋이 끝난 건축물만 권위 스냅샷으로 전파한다.
+func project_committed_piece(piece) -> void:
+	if piece == null:
+		return
+	if piece.owner_id == "":
+		piece.owner_id = GameState.local_player_id
+	if not is_online or not is_host:
+		return
+	if not register_authoritative_piece(piece):
+		return
+	_project_piece_snapshot.rpc(piece.net_id, piece.piece_id, piece.global_position,
+		piece.rotation.y, piece.owner_id)
+
+## RT1 클라이언트 건축은 전송조차 하지 않고 안정된 거절 결과를 반환한다.
+func request_place(_piece_id: String, _pos: Vector3, _yaw: float) -> Dictionary:
+	return unsupported_build_result("PLACE")
+
+func request_remove(_piece = null) -> Dictionary:
+	return unsupported_build_result("REMOVE")
+
+## 이전 프로토콜을 위조/재전송하는 피어를 위한 거절 전용 싱크다.
 @rpc("any_peer", "call_remote", "reliable")
-func _request_place(piece_id: String, pos: Vector3, yaw: float) -> void:
+func _request_place(_piece_id: String, _pos: Vector3, _yaw: float) -> void:
 	if not is_host:
 		return
-	var bs = _build_system()
-	if bs == null:
+	_reject_build_request.rpc_id(multiplayer.get_remote_sender_id(), unsupported_build_result("PLACE"))
+
+@rpc("any_peer", "call_remote", "reliable")
+func _request_remove(_nid: int) -> void:
+	if not is_host:
 		return
-	var piece = bs.place_remote(piece_id, pos, yaw)
-	if piece != null:
-		piece_placed(piece)
+	_reject_build_request.rpc_id(multiplayer.get_remote_sender_id(), unsupported_build_result("REMOVE"))
 
 @rpc("authority", "call_remote", "reliable")
-func _place_piece(nid: int, piece_id: String, pos: Vector3, yaw: float) -> void:
-	if net_pieces.has(nid) and is_instance_valid(net_pieces[nid]):
+func _reject_build_request(result: Dictionary) -> void:
+	build_request_rejected.emit(result.duplicate(true))
+
+## authority RPC 전용: 클라이언트에 이미 커밋된 상태를 관찰용으로 복제한다.
+@rpc("authority", "call_remote", "reliable")
+func _project_piece_snapshot(nid: int, piece_id: String, pos: Vector3, yaw: float,
+		owner_id: String) -> void:
+	if is_host or net_pieces.has(nid) and is_instance_valid(net_pieces[nid]):
 		return
 	var bs = _build_system()
 	if bs == null:
 		return
-	var piece = bs.place_remote(piece_id, pos, yaw)
+	var piece = bs.project_authority_snapshot(piece_id, pos, yaw, owner_id)
 	if piece != null:
 		piece.net_id = nid
 		net_pieces[nid] = piece
 
-func piece_removed(piece) -> void:
-	if not is_online or piece == null or piece.net_id <= 0:
+## 호스트 로컬 철거 커밋만 복제한다. 클라이언트 요청 경로와 분리한다.
+func project_removed_piece(piece) -> void:
+	if not is_online or not is_host or piece == null or piece.net_id <= 0 \
+			or bool(piece.get("authority_snapshot")):
 		return
-	if is_host:
-		var nid: int = piece.net_id
-		net_pieces.erase(nid)
-		_remove_piece.rpc(nid)
-	else:
-		_request_remove.rpc_id(1, piece.net_id)
-
-@rpc("any_peer", "call_remote", "reliable")
-func _request_remove(nid: int) -> void:
-	if not is_host:
-		return
-	var p = net_pieces.get(nid)
+	var nid: int = piece.net_id
+	piece.net_id = 0
 	net_pieces.erase(nid)
-	_remove_piece.rpc(nid)
-	if p != null and is_instance_valid(p):
-		p.net_id = 0
-		p.destroy(true)
+	_project_piece_removal.rpc(nid)
 
 @rpc("authority", "call_remote", "reliable")
-func _remove_piece(nid: int) -> void:
-	var p = net_pieces.get(nid)
+func _project_piece_removal(nid: int) -> void:
+	if is_host:
+		return
+	var piece = net_pieces.get(nid)
 	net_pieces.erase(nid)
-	if p != null and is_instance_valid(p):
-		p.net_id = 0
-		p.destroy(true)
+	if piece != null and is_instance_valid(piece):
+		piece.remove_authority_snapshot()
 
 func _build_system():
 	var scene := get_tree().current_scene
 	if scene == null:
 		return null
 	var bs = scene.get_node_or_null("build")
-	if bs == null or not bs.has_method("place_remote"):
+	if bs == null or not bs.has_method("project_authority_snapshot"):
 		return null
 	return bs
 

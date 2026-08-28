@@ -10,10 +10,52 @@ var keep_alive := true
 var ui_only := false
 var new_only := false
 var quick := false     # 그래픽 튜닝용 최소 세트 (초원/숲/해안)
+var _failures: Array[String] = []
+var _qa_width := -1
+var _qa_height := -1
+var _qa_locale := ""
 
 func _ready() -> void:
+	_parse_qa_args()
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	call_deferred("_run")
+
+
+func _parse_qa_args() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--qa-width="):
+			var width_value := arg.substr(11)
+			if width_value.is_valid_int():
+				_qa_width = int(width_value)
+			else:
+				_require(false, "invalid --qa-width value: " + width_value)
+		elif arg.begins_with("--qa-height="):
+			var height_value := arg.substr(12)
+			if height_value.is_valid_int():
+				_qa_height = int(height_value)
+			else:
+				_require(false, "invalid --qa-height value: " + height_value)
+		elif arg.begins_with("--qa-locale="):
+			_qa_locale = arg.substr(12)
+
+
+func _assert_qa_invocation() -> void:
+	var logical_size := Vector2i(get_viewport().get_visible_rect().size.round())
+	var output_size := get_viewport().get_texture().get_size()
+	var active_locale := TranslationServer.get_locale()
+	print("[QA] expected output=%dx%d locale=%s; active output=%dx%d logical=%dx%d locale=%s" % [
+		_qa_width, _qa_height, _qa_locale, output_size.x, output_size.y,
+		logical_size.x, logical_size.y, active_locale])
+	_require(_qa_width > 0, "UI QA requires a positive --qa-width argument")
+	_require(_qa_height > 0, "UI QA requires a positive --qa-height argument")
+	_require(not _qa_locale.is_empty(), "UI QA requires a non-empty --qa-locale argument")
+	if _qa_width > 0 and _qa_height > 0:
+		_require(output_size == Vector2i(_qa_width, _qa_height),
+			"render output %dx%d does not match expected %dx%d" % [
+				output_size.x, output_size.y, _qa_width, _qa_height])
+	if not _qa_locale.is_empty():
+		_require(active_locale == _qa_locale,
+			"active locale %s does not match expected %s" % [active_locale, _qa_locale])
 
 ## 촬영 중에는 플레이어가 죽지 않게 유지한다(연출 목적)
 func _process(_delta: float) -> void:
@@ -49,8 +91,68 @@ func _shot(tag: String) -> void:
 	await RenderingServer.frame_post_draw
 	var img := get_viewport().get_texture().get_image()
 	var path := "%s/%02d_%s.png" % [out_dir, _n, tag]
-	img.save_png(path)
-	print("[SHOT] ", path)
+	var error := img.save_png(path)
+	_require(error == OK, "failed to save screenshot %s: error %d" % [path, error])
+	if error == OK:
+		print("[SHOT] ", path)
+
+func assert_title_layout(main: Node) -> void:
+	var viewport := main.get_viewport() as Viewport
+	var menu := main.find_child("title_menu", true, false) as Control
+	_require(viewport != null, "title viewport was not found for layout validation")
+	_require(menu != null, "title menu was not found for layout validation")
+	if viewport == null or menu == null:
+		return
+	_require(_inside_rect(menu, viewport.get_visible_rect()), "title menu exceeds the viewport")
+	for node_name in ["title_new_game", "title_join"]:
+		var action := menu.find_child(node_name, true, false) as Control
+		_require(action != null and action.is_visible_in_tree()
+			and _inside_rect(action, viewport.get_visible_rect()),
+			"title action %s is not visible inside the viewport" % node_name)
+	var continue_action := menu.find_child("title_continue", true, false) as Control
+	if continue_action != null:
+		_require(continue_action.is_visible_in_tree()
+			and _inside_rect(continue_action, viewport.get_visible_rect()),
+			"title Continue action is not visible inside the viewport")
+
+
+func _assert_control_contained(control: Control, label: String) -> void:
+	_require(control != null and control.is_visible_in_tree(), "%s is not visible" % label)
+	if control != null and control.is_visible_in_tree():
+		_require(_inside_viewport(control), "%s exceeds the viewport safe area" % label)
+
+
+func _inside_viewport(control: Control) -> bool:
+	var viewport_rect := get_viewport().get_visible_rect().grow(-UITheme.SAFE_MARGIN_SMALL)
+	return viewport_rect.encloses(control.get_global_rect())
+
+
+func _inside_rect(control: Control, viewport_rect: Rect2) -> bool:
+	return viewport_rect.encloses(control.get_global_rect())
+
+
+func _assert_actionable_focus(label: String) -> void:
+	var owner := get_viewport().gui_get_focus_owner()
+	var actionable := owner != null and (bool(owner.get_meta("keyboard_actionable", false)) \
+		or owner is BaseButton and not (owner as BaseButton).disabled \
+		or owner is LineEdit and (owner as LineEdit).editable \
+		or owner is Range or owner is ItemList or owner is Tree)
+	_require(owner != null and owner.is_visible_in_tree() and actionable,
+		"%s did not restore focus to an actionable control" % label)
+
+
+func _assert_ui_feedback_contained(hud) -> void:
+	_assert_control_contained(hud.objective_panel, "objective panel")
+	if hud.objective_action != null and hud.objective_action.is_visible_in_tree():
+		_assert_control_contained(hud.objective_action, "objective action")
+	if hud.action_panel != null and hud.action_panel.is_visible_in_tree():
+		_assert_control_contained(hud.action_panel, "action feedback")
+		if hud.action_feedback != null and hud.action_feedback.is_visible_in_tree():
+			_assert_control_contained(hud.action_feedback, "action feedback text")
+	if hud.msg_box != null:
+		for child in hud.msg_box.get_children():
+			if child is Control and child.is_visible_in_tree():
+				_assert_control_contained(child as Control, "toast feedback")
 
 ## 특정 바이옴의 보기 좋은 지점 찾기.
 ## 1차는 "사방 260m 가 육지"인 내륙 지점만 노린다(바다가 화면을 덮지 않게).
@@ -198,9 +300,12 @@ func _spawn(id: String, n: int, radius: float = 7.0) -> void:
 func _run() -> void:
 	await _wait(40)
 	var m = _main()
+	if ui_only:
+		_assert_qa_invocation()
 	var p := _p()
 	if p == null:
-		push_error("no player")
+		_require(false, "no player")
+		_finish("촬영")
 		return
 	print("[UI] ui=", m.ui, " in_tree=", m.ui.is_inside_tree() if m.ui else false,
 		" layer=", m.ui.layer if m.ui else -1,
@@ -210,7 +315,7 @@ func _run() -> void:
 	# 촬영 동안은 스폰 매니저를 잠시 멈춘다
 	if m.spawner:
 		m.spawner.set_process(false)
-	p.input_locked = true
+	m.ui.set_transition(true)
 
 	var give := ["flint_axe", "antler_pickaxe", "wood_shield", "finewood_bow",
 		"iron_arrow", "leather_helmet", "leather_tunic", "leather_pants", "torch",
@@ -229,6 +334,8 @@ func _run() -> void:
 	p.stats.eat("cooked_deer_meat")
 	p.stats.eat("queens_jam")
 	p.stats.eat("bread")
+	# QA용 대량 재료가 과적 상태를 만들어 첫 세션 UI를 왜곡하지 않게 한다.
+	p.inventory.max_weight = 2500.0
 
 	# 무기 장착 (검 + 방패)
 	for i in range(p.inventory.size()):
@@ -239,15 +346,16 @@ func _run() -> void:
 				"leather_tunic", "leather_pants", "iron_arrow"]:
 			p.inventory.toggle_equip(i)
 
+	# UI 검증은 실제 플레이 상태에서 모달 자체가 입력 잠금을 소유해야 한다.
+	# TRANSITION 우선순위를 남겨두면 패널 포커스 경로를 검증하지 못한다.
 	if ui_only:
+		m.ui.set_transition(false)
 		await _ui_sequence(m, p)
-		print("[SHOT] === UI 확인 완료 ===")
-		get_tree().quit()
+		_finish("UI 확인")
 		return
 	if new_only:
 		await _new_systems(m, p)
-		print("[SHOT] === 신규 시스템 확인 완료 ===")
-		get_tree().quit()
+		_finish("신규 시스템 확인")
 		return
 	if quick:
 		await _time(0.38)
@@ -263,8 +371,7 @@ func _run() -> void:
 		await _weather("cloudy")
 		await _goto(_find(Const.Biome.BLACKFOREST), 1.2, -0.08, 5.0)
 		await _shot("q_blackforest")
-		print("[SHOT] === 퀵 확인 완료 ===")
-		get_tree().quit()
+		_finish("퀵 확인")
 		return
 
 	# 01 초원 아침
@@ -385,7 +492,7 @@ func _run() -> void:
 		if not s3.is_empty() and str(s3["id"]) == "hammer":
 			p.inventory.toggle_equip(i)
 			break
-	p.input_locked = false
+	m.ui.set_transition(false)
 	m.build_system.select("wood_floor")
 	await _wait(25)
 	await _shot("build_mode")
@@ -397,7 +504,7 @@ func _run() -> void:
 			p.inventory.toggle_equip(i)
 			break
 	await _wait(6)
-	p.input_locked = true
+	m.ui.set_transition(true)
 
 	# 19 인벤토리 UI
 	m.ui.close_all()
@@ -475,21 +582,25 @@ func _run() -> void:
 	await _goto(_coast(), 0.0, -0.02, 6.5)
 	await _shot("coast_dawn")
 
-	print("[SHOT] === 완료: ", _n, " 장 ===")
-	await _wait(10)
-	get_tree().quit()
+	_finish("완료: %d 장" % _n)
 
 ## UI 배치 확인용 짧은 시퀀스
 func _ui_sequence(m, p) -> void:
 	await _time(0.42)
 	await _goto(_find(Const.Biome.MEADOWS), 0.6, -0.10, 4.5)
 	m.ui.close_all(); m.ui.open_panel(m.ui.inv_ui); await _wait(14)
+	_assert_ui_feedback_contained(m.ui.hud)
+	_assert_control_contained(m.ui.inv_ui, "inventory panel")
+	_assert_actionable_focus("inventory panel")
 	await _shot("ui_inventory")
 	m.ui.close_all(); m.ui.open_craft(RecipeDB.ST_WORKBENCH, p); await _wait(14)
+	_assert_ui_feedback_contained(m.ui.hud)
+	_assert_control_contained(m.ui.craft_ui, "crafting panel")
+	_assert_actionable_focus("crafting panel")
 	await _shot("ui_crafting")
 	m.ui.close_all()
 	for s2 in Const.Skill.values():
-		p.stats.raise_skill(s2, 30.0)
+		p.stats.skills[s2] = {"lvl": 8.0, "xp": 0.0}
 	m.ui._refresh_skills(); m.ui.open_panel(m.ui.skills_ui); await _wait(14)
 	await _shot("ui_skills")
 	m.ui.close_all()
@@ -498,35 +609,52 @@ func _ui_sequence(m, p) -> void:
 			GameState.discovered[Vector2i(int(p.global_position.x / 32.0) + dx,
 				int(p.global_position.z / 32.0) + dz)] = true
 	m.ui.open_panel(m.ui.map_ui); await _wait(60)
+	_assert_ui_feedback_contained(m.ui.hud)
+	_assert_control_contained(m.ui.map_ui, "map panel")
 	await _shot("ui_map")
 	m.ui.close_all()
 	m.ui.toggle_pause(); await _wait(14)
+	_assert_ui_feedback_contained(m.ui.hud)
+	_assert_control_contained(m.ui.pause_ui, "pause panel")
+	_assert_actionable_focus("pause panel")
 	await _shot("ui_pause")
 	m.ui.close_all()
 	for i in range(p.inventory.size()):
 		var s3: Dictionary = p.inventory.get_slot(i)
 		if not s3.is_empty() and str(s3["id"]) == "hammer":
-			p.inventory.toggle_equip(i)
+			if not p.inventory.is_equipped(i):
+				p.inventory.toggle_equip(i)
 			break
-	p.input_locked = false
+	m.ui.set_transition(false)
 	m.build_system.select("wood_wall")
+	await _wait(4)
+	m.ui.build_ui.open_palette()
 	await _wait(25)
+	_assert_ui_feedback_contained(m.ui.hud)
+	_assert_control_contained(m.ui.build_ui, "build palette")
+	_assert_actionable_focus("build palette")
 	await _shot("ui_build")
 
 	# 저장/불러오기 왕복 검증
 	var before_wood: int = p.inventory.count("wood")
 	var before_pos: Vector3 = p.global_position
-	var ok_save: bool = SaveSystem.save_game(p, m.build_system, "selftest")
+	var ok_save: bool = SaveSystem.save_game(p, m.build_system)
+	if not ok_save:
+		_require(false, "save round-trip setup failed: " + SaveSystem.last_error)
+		SaveSystem.delete_save()
+		return
 	p.inventory.remove_item("wood", before_wood)
 	p.global_position = before_pos + Vector3(50, 0, 50)
-	var ok_load: bool = SaveSystem.load_game(p, m.build_system, "selftest")
+	var ok_load: bool = SaveSystem.load_game(p, m.build_system)
 	var after_wood: int = p.inventory.count("wood")
+	var position_restored: bool = p.global_position.distance_to(before_pos) < 1.0
 	print("[TEST] save=", ok_save, " load=", ok_load,
 		" wood ", before_wood, "->", after_wood,
 		" pos_delta=", p.global_position.distance_to(before_pos))
-	print("[TEST] ", "PASS" if (ok_save and ok_load and after_wood == before_wood \
-		and p.global_position.distance_to(before_pos) < 1.0) else "FAIL")
-	SaveSystem.delete_save("selftest")
+	_require(ok_load, "save round-trip load failed: " + SaveSystem.last_error)
+	_require(after_wood == before_wood, "save round-trip did not restore inventory")
+	_require(position_restored, "save round-trip did not restore player position")
+	SaveSystem.delete_save()
 
 ## 신규 시스템 전용 촬영 (지형변형·낚시·항해·길들이기·마법·던전)
 func _new_systems(m, p) -> void:
@@ -707,6 +835,19 @@ func _new_systems(m, p) -> void:
 	p.remove_meta("in_dungeon")
 	await _goto(_find(Const.Biome.MEADOWS), 0.6, -0.10, 5.0)
 
+
+func _require(condition: bool, message: String) -> void:
+	if not condition and not _failures.has(message):
+		_failures.append(message)
+
+func _finish(label: String) -> void:
+	var succeeded := _failures.is_empty()
+	if succeeded:
+		print("[SHOT] === %s 완료 ===" % label)
+	else:
+		for failure in _failures:
+			push_error("[SHOT] FAIL: " + failure)
+	get_tree().quit(0 if succeeded else 1)
 
 func _coast() -> Vector3:
 	var gen := GameState.gen

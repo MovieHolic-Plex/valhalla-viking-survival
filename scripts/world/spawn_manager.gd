@@ -14,11 +14,16 @@ var _raid_timer := 0.0
 var _raid_active := false
 var _raid_left := 0
 
+func _has_world_authority() -> bool:
+	return not Net.is_online or Net.is_host
+
 func _ready() -> void:
 	_rng.randomize()
 	_raid_timer = _rng.randf_range(600.0, 1100.0)
 
 func _process(delta: float) -> void:
+	if not _has_world_authority():
+		return
 	var p := GameState.player
 	if p == null or not is_instance_valid(p) or p.stats.is_dead:
 		return
@@ -114,6 +119,8 @@ func _cleanup(p: Node3D) -> void:
 
 # ─────────────────────────────────────────────── 습격 이벤트
 func _start_raid(p: Node3D) -> void:
+	if not _has_world_authority():
+		return
 	var tier := int(Const.BIOME_TIER.get(GameState.current_biome, 0))
 	var pool := EnemyDB.in_biome(GameState.current_biome, GameState.is_night())
 	if pool.is_empty():
